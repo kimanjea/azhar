@@ -510,3 +510,4 @@ strong { font-weight: 600; }
 .principles { list-style: none; display: grid; gap: var(--space-3); margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--sep); max-width: var(--measure); }
 .principles li { color: var(--fg-2); }
 .principles strong { color: var(--fg); }
+.signoff { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--sep); font: 700 var(--t-3)/1.2 var(--display); letter-spacing: -0.022em; color: var(--fg); max-width: var(--measure); }
