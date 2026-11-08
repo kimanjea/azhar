@@ -512,3 +512,6 @@ strong { font-weight: 600; }
 .principles li { color: var(--fg-2); }
 .principles strong { color: var(--fg); }
 .signoff { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--sep); font: 700 var(--t-3)/1.2 var(--display); letter-spacing: -0.022em; color: var(--fg); max-width: var(--measure); }
+
+/* Longer hero statement: smaller display size, wider measure */
+.hero h1.hero-long { font-size: clamp(2.25rem, 1.2rem + 4vw, 5rem); line-height: 1.02; letter-spacing: -0.04em; max-width: 24ch; }
