@@ -379,10 +379,11 @@ strong { font-weight: 600; }
 
 /* ---------- About ---------- */
 .about-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: clamp(32px, 6vw, 96px); align-items: start; }
-.portrait { border-radius: var(--r-xl); overflow: clip; aspect-ratio: 499 / 375; max-width: 499px; background: var(--bg-2); }
-.portrait img { width: 100%; height: 100%; object-fit: cover; object-position: 45% 30%; filter: var(--img-filter); }
+.about-figure { margin: 0; }
+.portrait { border-radius: var(--r-xl); overflow: clip; aspect-ratio: 4 / 3; background: var(--bg-2); }
+.portrait img { width: 100%; height: 100%; object-fit: cover; filter: var(--img-filter); }
 .portrait-cap { margin-top: var(--space-3); }
-@media (max-width: 860px) { .about-grid { grid-template-columns: 1fr; } .portrait { max-width: 420px; } }
+@media (max-width: 860px) { .about-grid { grid-template-columns: 1fr; } }
 
 .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: var(--space-6) var(--space-7); }
 .fact h3 { font-size: var(--t-cap); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-2); margin-bottom: var(--space-3); font-family: var(--sans); }
