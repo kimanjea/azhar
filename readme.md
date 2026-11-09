@@ -13,7 +13,8 @@ Static site served by GitHub Pages at https://kimanjea.github.io/azhar/. No buil
 | `styles/site.css` | Design tokens and all styles (light and dark follow the system setting) |
 | `scripts/site.js` | Nav, mobile menu, copy email, scroll reveals. Pages work without it. |
 | `img/` | Optimized images (`work/` screenshots, `logos/`, `portrait.jpg`, `og.jpg` share image) |
-| `Azhar-Amir-Kimanje-CV.pdf` | CV linked from every page |
+| `Azhar-Amir-Kimanje-Resume.pdf` | One-page resume (main download on Home and About) |
+| `Azhar-Amir-Kimanje-CV.pdf` | Full CV (Experience page and contact section) |
 | `_legacy/` | The previous Bootstrap site and full-size original images. Not published (GitHub Pages skips `_` folders). |
 
 The navigation and contact footer are repeated in every page. When you add a page or change a nav link, update all six files.
