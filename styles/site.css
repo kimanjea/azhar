@@ -515,3 +515,4 @@ strong { font-weight: 600; }
 
 /* Longer hero statement: smaller display size, wider measure */
 .hero h1.hero-long { font-size: clamp(2.25rem, 1.2rem + 4vw, 5rem); line-height: 1.02; letter-spacing: -0.04em; max-width: 24ch; }
+
