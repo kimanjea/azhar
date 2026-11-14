@@ -20,55 +20,67 @@ const HALF = (() => {
   return t;
 })();
 
+const gunzip = async (u8) => new Uint8Array(await new Response(new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+
 async function fetchF4D(urls, total, onProgress) {
-  // the file is stored in parts (GitHub limits file size); stream them back-to-back into one gzip stream
-  let got = 0, i = 0;
-  const joined = new ReadableStream({
-    async pull(ctl) {
-      if (i >= urls.length) { ctl.close(); return; }
-      const r = await fetch(urls[i++]);
-      if (!r.ok) { ctl.error(new Error('The 4D file could not be loaded.')); return; }
-      const reader = r.body.getReader();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        got += value.byteLength; onProgress(Math.min(1, got / total)); ctl.enqueue(value);
-      }
-    },
-  });
-  const buf = await new Response(joined.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-  const u8 = new Uint8Array(buf);
-  if (String.fromCharCode(...u8.subarray(0, 4)) !== 'F4D1') throw new Error('Not a 4D file.');
-  const hl = new DataView(buf).getUint32(4, true);
-  const h = JSON.parse(new TextDecoder().decode(u8.subarray(8, 8 + hl)));
+  // the file is stored in parts (GitHub limits file size): download them back to back into one buffer
+  let got = 0;
+  const chunks = [];
+  for (const url of urls) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('The 4D file could not be loaded.');
+    const reader = r.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value); got += value.byteLength; onProgress(Math.min(1, got / total));
+    }
+  }
+  let file = new Uint8Array(got);
+  for (let o = 0, i = 0; i < chunks.length; o += chunks[i].byteLength, i++) file.set(chunks[i], o);
+  chunks.length = 0;
+
+  // F4D2 (web form): base and each frame compressed on their own, so frames stay small until shown.
+  // F4D1: one compressed stream; unpacked whole.
+  let raw = file, blocks;
+  const v2 = String.fromCharCode(...file.subarray(0, 4)) === 'F4D2';
+  if (!v2) { raw = await gunzip(file); file = null; }
+  if (!['F4D1', 'F4D2'].includes(String.fromCharCode(...raw.subarray(0, 4)))) throw new Error('Not a 4D file.');
+  const hl = new DataView(raw.buffer, raw.byteOffset).getUint32(4, true);
+  const h = JSON.parse(new TextDecoder().decode(raw.subarray(8, 8 + hl)));
+  const sizes = v2 ? h.z_bytes : h.block_bytes;
   let off = 8 + hl;
+  blocks = sizes.map((sz) => { const b = raw.subarray(off, off + sz); off += sz; return b; });
+  const baseBytes = v2 ? await gunzip(blocks[0]) : blocks[0];
+
+  // phones skip the view-dependent colour detail (SH): 45 of 59 values per splat, the bulk of each frame's memory
   const n = h.splats, P = h.props.length;
-  const b16 = new Uint16Array(buf.slice(off, off + h.block_bytes[0]));
-  off += h.block_bytes[0];
-  const base = h.props.map(() => new Float32Array(n));
-  for (let i = 0; i < n; i++) for (let c = 0; c < P; c++) base[c][i] = HALF[b16[i * P + c]];
-  const offsets = [];
-  for (let k = 0; k < h.frames; k++) { offsets.push(off); off += h.block_bytes[1 + k]; }
-  return { h, buf, base, offsets };
+  const keep = h.props.map((p, c) => [p, c]).filter(([p]) => !(SMALL && p.startsWith('f_rest')));
+  const b16 = new Uint16Array(baseBytes.buffer.slice(baseBytes.byteOffset, baseBytes.byteOffset + baseBytes.byteLength));
+  const base = keep.map(([, c]) => { const a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = HALF[b16[i * P + c]]; return a; });
+  const frame = (k) => v2 ? gunzip(blocks[1 + k]) : Promise.resolve(blocks[1 + k]);
+  return { h, base, props: keep.map(([p]) => p), frame };
 }
 
-function buildFrame(pc, dec, k) {
+async function buildFrame(pc, dec, k) {
   // frame k = base + its stored differences, exactly as packed
-  const { h, base, buf, offsets } = dec, n = h.splats;
-  const ix = Object.fromEntries(h.props.map((p, i) => [p, i]));
-  const storage = base.map((a) => a.slice());
-  let pos = offsets[k];
+  const { h, base, props } = dec, n = h.splats;
+  const ix = Object.fromEntries(props.map((p, i) => [p, i]));
+  const moving = new Set(Object.values(h.groups).flat());
+  const storage = base.map((a, i) => moving.has(props[i]) ? a.slice() : a);   // unchanged values are shared, not copied
+  const bytes = await dec.frame(k);
+  const all = new Int16Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  let pos = 0;
   for (const [g, cols] of Object.entries(h.groups)) {
-    const len = n * cols.length, step = h.steps[g];
-    const q = new Int16Array(buf.slice(pos, pos + len * 2));
-    pos += len * 2;
+    const step = h.steps[g];
     cols.forEach((col, ci) => {
-      const a = storage[ix[col]], o = ci * n;
-      for (let i = 0; i < n; i++) { const d = q[o + i]; if (d) a[i] += d * step; }
+      const a = storage[ix[col]], o = pos + ci * n;
+      if (a) for (let i = 0; i < n; i++) { const d = all[o + i]; if (d) a[i] += d * step; }
     });
+    pos += n * cols.length;
   }
   return new pc.GSplatData([{ name: 'vertex', count: n,
-    properties: h.props.map((name, c) => ({ type: 'float', name, storage: storage[c], byteSize: 4 })) }]);
+    properties: props.map((name, c) => ({ type: 'float', name, storage: storage[c], byteSize: 4 })) }]);
 }
 
 class Player {
@@ -169,18 +181,24 @@ class Player {
       if (gen !== this.gen) return;
       this.teardown();
       this.$('.s4d-status').textContent = e.noDevice
-        ? 'This device couldn’t open a 3D view. Close other tabs and try again. On iPhone, Lockdown Mode turns 3D off.'
+        ? `This browser couldn’t open a 3D view (${e.detail}). On iPhone, Lockdown Mode turns 3D off.`
         : `Couldn’t start the 3D view. ${e.message}`;
     }
   }
 
   async initViewer(CameraControls) {
     const pc = this.pc, canvas = this.$('.s4d-canvas');
-    let device;
-    for (const o of [{ antialias: false, powerPreference: 'high-performance' }, {}]) {    // retry with plain settings
-      try { device = await pc.createGraphicsDevice(canvas, { deviceTypes: ['webgl2'], ...o }); break; } catch {}
+    // WebGL 2 first, then plain settings, then WebGPU (newer iPhones and browsers)
+    let device, why = '';
+    for (const o of [{ deviceTypes: ['webgl2'], antialias: false, powerPreference: 'high-performance' },
+                     { deviceTypes: ['webgl2'] }, { deviceTypes: ['webgpu'] }]) {
+      if (o.deviceTypes[0] === 'webgpu' && !navigator.gpu) continue;
+      try { device = await pc.createGraphicsDevice(canvas, o); if (device) break; } catch (e) { why = e?.message || String(e); }
     }
-    if (!device) throw Object.assign(new Error('No graphics device.'), { noDevice: true });
+    if (!device) {
+      const gl = (() => { try { return document.createElement('canvas').getContext('webgl2') ? 'WebGL 2 works' : 'WebGL 2 unavailable'; } catch { return 'WebGL 2 blocked'; } })();
+      throw Object.assign(new Error(why), { noDevice: true, detail: `${gl}${navigator.gpu ? ', WebGPU present' : ''}${why ? ` · ${why}` : ''}` });
+    }
     device.maxPixelRatio = Math.min(devicePixelRatio, SMALL ? 1.5 : 2);
     const opts = new pc.AppOptions();
     opts.graphicsDevice = device;
@@ -225,11 +243,13 @@ class Player {
   load(k) {
     if (this.cache.has(k)) return Promise.resolve(this.cache.get(k));
     if (this.loading.has(k)) return this.loading.get(k);
-    const p = this.chain = this.chain.then(() => new Promise((r) => setTimeout(r, 0))).then(() => {
+    const dec = this.dec;
+    const p = this.chain.then(() => new Promise((r) => setTimeout(r, 0))).then(async () => {
       this.loading.delete(k);
       if (this.cache.has(k)) return this.cache.get(k);
-      const pc = this.pc;
-      const res = new pc.GSplatResource(this.app.graphicsDevice, buildFrame(pc, this.dec, k));
+      const pc = this.pc, data = await buildFrame(pc, dec, k);
+      if (dec !== this.dec || !this.app) throw new Error('stale');
+      const res = new pc.GSplatResource(this.app.graphicsDevice, data);
       const e = new pc.Entity(`frame_${k}`);
       e.addComponent('gsplat');
       e.gsplat.resource = res;
@@ -238,6 +258,7 @@ class Player {
       this.content.addChild(e);
       const f = { e, res }; this.cache.set(k, f); return f;
     });
+    this.chain = p.catch(() => {});      // one failed frame never blocks the ones queued after it
     this.loading.set(k, p);
     return p;
   }
