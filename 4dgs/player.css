@@ -38,3 +38,24 @@
 @keyframes s4d-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 @media (max-width: 560px) { .s4d-time { display: none; } .s4d-controls button { padding: 0 9px; } }
 @media (prefers-reduced-motion: reduce) { .s4d.is-live .s4d-hint { animation: none; } }
+
+/* "More 4D clips": a quiet disclosure under the player */
+.s4d-more { margin-top: var(--space-3); }
+.s4d-more-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 2px; border: 0; background: none;
+  color: var(--accent); font: 500 .9375rem/1 var(--sans); cursor: pointer; border-radius: 6px; }
+.s4d-more-toggle::after { content: ""; width: 7px; height: 7px; border: solid currentColor; border-width: 0 1.5px 1.5px 0;
+  transform: translateY(-2px) rotate(45deg); transition: transform var(--dur-fast) var(--ease-out); }
+.s4d-more-toggle[aria-expanded="true"]::after { transform: translateY(1px) rotate(-135deg); }
+.s4d-more-toggle:hover { text-decoration: underline; text-underline-offset: 3px; }
+.s4d-more-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-2); }
+.s4d-more-list button { width: 100%; display: grid; gap: 6px; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.s4d-more-list img { width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: cover; border-radius: 10px; filter: var(--img-filter);
+  box-shadow: 0 0 0 1px var(--sep) inset; transition: box-shadow var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out); }
+.s4d-more-list button:hover img { opacity: .85; }
+.s4d-more-list button[aria-current="true"] img { box-shadow: 0 0 0 2px var(--accent); }
+.s4d-more-list span { display: grid; gap: 2px; }
+.s4d-more-list b { font-size: .8125rem; font-weight: 600; }
+.s4d-more-list small { font-size: .75rem; opacity: .7; }
+@media (max-width: 560px) { .s4d-more-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; } .s4d-more-list b { font-size: .75rem; } }
+/* the card's image slot holds the player plus the clip list, so it drops its own frame */
+.shot.s4d-shot { aspect-ratio: auto; overflow: visible; background: none; box-shadow: none; border-radius: 0; }

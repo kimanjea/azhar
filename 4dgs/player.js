@@ -74,23 +74,83 @@ class Player {
     this.root = root;
     this.sceneUrl = new URL(root.dataset.scene, location.href);
     this.$ = (s) => root.querySelector(s);
+    this.gen = 0; this.live = false; this.visible = true;
     this.$('.s4d-start').addEventListener('click', () => this.start());
+    // controls are wired once; they act only while a clip is live
+    new IntersectionObserver(([e]) => { this.visible = e.isIntersecting; }).observe(root);
+    this.$('.s4d-play').addEventListener('click', () => { if (this.live) { this.playing = !this.playing; this.render(); } });
+    this.$('.s4d-scrub').addEventListener('input', (e) => { if (this.live) { this.playing = false; this.seek(Number(e.target.value)); this.render(); } });
+    for (const b of root.querySelectorAll('[data-view]')) b.addEventListener('click', () => this.live && this.goTo(b.dataset.view));
+    root.addEventListener('keydown', (e) => {
+      if (!this.live || !e.target.classList.contains('s4d-canvas')) return;
+      if (e.key === ' ') { this.playing = !this.playing; this.render(); e.preventDefault(); }
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { this.playing = false; this.seek(this.i + (e.key === 'ArrowRight' ? 1 : -1)); this.render(); }
+    });
+    this.initMore();
+  }
+
+  // "More 4D clips": swap which clip this player shows
+  initMore() {
+    const card = this.root.closest('article') || document, more = card.querySelector('.s4d-more');
+    if (!more) return;
+    const toggle = more.querySelector('.s4d-more-toggle'), list = more.querySelector('.s4d-more-list');
+    toggle.addEventListener('click', () => {
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      toggle.setAttribute('aria-expanded', String(open)); list.hidden = !open;
+    });
+    for (const b of list.querySelectorAll('[data-scene]')) b.addEventListener('click', () => {
+      for (const x of list.querySelectorAll('[data-scene]')) x.setAttribute('aria-current', String(x === b));
+      this.switchTo(b.dataset);
+      this.root.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'nearest' });
+    });
+  }
+
+  switchTo({ scene, poster, status, alt }) {
+    const url = new URL(scene, location.href);
+    if (url.href === this.sceneUrl.href) return;
+    const wasStarted = this.live || this.root.classList.contains('is-loading');
+    this.teardown();
+    this.sceneUrl = url;
+    const img = this.$('.s4d-poster');
+    if (poster) img.src = poster;
+    if (alt) img.alt = alt;
+    this.$('.s4d-status').textContent = status || '';
+    if (wasStarted) this.start();
+  }
+
+  teardown() {
+    this.gen++; this.live = false; this.playing = false;
+    if (this.app) {
+      for (const f of this.cache.values()) { f.e.destroy(); f.res.destroy?.(); }
+      this.cache.clear();
+      this.resize?.disconnect();
+      this.app.destroy(); this.app = null;
+      const old = this.$('.s4d-canvas'), fresh = old.cloneNode(false);    // a used WebGL canvas can't be reused
+      old.replaceWith(fresh);
+    }
+    this.dec = null;
+    this.root.classList.remove('is-live', 'is-loading');
+    this.$('.s4d-bar > div').style.width = '0';
+    this.$('.s4d-start').disabled = false;
   }
 
   async start() {
-    const btn = this.$('.s4d-start');
+    const btn = this.$('.s4d-start'), gen = ++this.gen;
     btn.disabled = true;
     this.root.classList.add('is-loading');
     try {
       const scene = await (await fetch(this.sceneUrl)).json();
+      if (gen !== this.gen) return;
       this.scene = scene;
       const [pc, { CameraControls }] = await Promise.all([import(PC), import(CONTROLS)]);
       this.pc = pc;
       const dec = await fetchF4D((scene.parts || [scene.file]).map((p) => new URL(p, this.sceneUrl)), scene.bytes,
-        (p) => { this.$('.s4d-bar > div').style.width = `${Math.round(p * 100)}%`; this.$('.s4d-status').textContent = `Loading ${Math.round(p * 100)}%`; });
+        (p) => { if (gen !== this.gen) return; this.$('.s4d-bar > div').style.width = `${Math.round(p * 100)}%`; this.$('.s4d-status').textContent = `Loading ${Math.round(p * 100)}%`; });
+      if (gen !== this.gen) return;
       this.$('.s4d-status').textContent = 'Preparing…';
       this.dec = dec;
       await this.initViewer(CameraControls);
+      if (gen !== this.gen) return;
       this.root.classList.remove('is-loading');
       this.root.classList.add('is-live');
       this.frames = dec.h.frames;
@@ -99,10 +159,11 @@ class Player {
       scrub.max = String(this.frames - 1);
       await this.seek(0);
       this.goTo('cam1', true);
+      this.live = true;
       this.playing = !reduceMotion;
       this.render();
-      this.watchVisibility();
     } catch (e) {
+      if (gen !== this.gen) return;
       this.root.classList.remove('is-loading');
       this.$('.s4d-status').textContent = `Couldn’t start the 3D view. ${e.message}`;
       btn.disabled = false;
@@ -110,7 +171,7 @@ class Player {
   }
 
   async initViewer(CameraControls) {
-    const pc = this.pc, canvas = this.$('canvas');
+    const pc = this.pc, canvas = this.$('.s4d-canvas');
     const device = await pc.createGraphicsDevice(canvas, { deviceTypes: ['webgl2'], antialias: false });
     device.maxPixelRatio = Math.min(devicePixelRatio, 2);
     const opts = new pc.AppOptions();
@@ -122,7 +183,7 @@ class Player {
     app.setCanvasFillMode(pc.FILLMODE_NONE);
     app.setCanvasResolution(pc.RESOLUTION_AUTO);
     const fit = () => app.resizeCanvas(canvas.clientWidth, canvas.clientHeight);
-    new ResizeObserver(fit).observe(canvas);
+    (this.resize = new ResizeObserver(fit)).observe(canvas);
     fit();
     const bg = getComputedStyle(this.root).getPropertyValue('--s4d-bg').trim() || '#0b0b0c';
     const c = new pc.Color(); c.fromString(bg);
@@ -192,7 +253,7 @@ class Player {
   }
 
   tick(dt) {
-    if (!this.playing || !this.visible) return;
+    if (!this.live || !this.playing || !this.visible) return;
     this.acc += dt;
     if (this.acc < 1 / this.fps) return;
     const next = (this.i + 1) % this.frames;
@@ -205,19 +266,6 @@ class Player {
     play.dataset.state = this.playing ? 'playing' : 'paused';
     this.$('.s4d-scrub').value = String(this.i);
     this.$('.s4d-time').textContent = `${clock(this.i / this.fps)} · ${this.i + 1}/${this.frames}`;
-  }
-
-  watchVisibility() {
-    // pause rendering work while the player is off screen
-    this.visible = true;
-    new IntersectionObserver(([e]) => { this.visible = e.isIntersecting; }).observe(this.root);
-    this.$('.s4d-play').addEventListener('click', () => { this.playing = !this.playing; this.render(); });
-    this.$('.s4d-scrub').addEventListener('input', (e) => { this.playing = false; this.seek(Number(e.target.value)); this.render(); });
-    for (const b of this.root.querySelectorAll('[data-view]')) b.addEventListener('click', () => this.goTo(b.dataset.view));
-    this.$('.s4d-canvas').addEventListener('keydown', (e) => {
-      if (e.key === ' ') { this.playing = !this.playing; this.render(); e.preventDefault(); }
-      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { this.playing = false; this.seek(this.i + (e.key === 'ArrowRight' ? 1 : -1)); this.render(); }
-    });
   }
 }
 

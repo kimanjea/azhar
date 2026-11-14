@@ -189,7 +189,7 @@
     </div>
 
     <article class="feature reveal" id="4dgs" aria-labelledby="s4d-title">
-      <div class="shot">
+      <div class="shot s4d-shot">
         <div class="s4d" data-splat4d data-scene="4dgs/cat/scene.json">
           <img class="s4d-poster" src="4dgs/cat/poster.jpg" alt="Two cats resting on a sofa, captured as a moving Gaussian splat" width="1440" height="900" loading="lazy">
           <canvas class="s4d-canvas" tabindex="0" aria-label="Interactive 3D view. Drag to orbit, scroll to zoom, Space to play or pause, arrow keys to step."></canvas>
@@ -206,6 +206,17 @@
             <button type="button" data-view="cam1" aria-pressed="true">View 1</button>
             <button type="button" data-view="cam2" aria-pressed="false">View 2</button>
           </div>
+        </div>
+        <div class="s4d-more">
+          <button class="s4d-more-toggle" type="button" aria-expanded="false" aria-controls="s4d-more-list">More 4D clips</button>
+          <ul class="s4d-more-list" id="s4d-more-list" hidden>
+            <li><button type="button" aria-current="true" data-scene="4dgs/cat/scene.json" data-poster="4dgs/cat/poster.jpg" data-status="5 seconds · 66 MB download" data-alt="Two cats resting on a sofa, captured as a moving Gaussian splat">
+              <img src="4dgs/cat/poster.jpg" alt="" width="1440" height="900" loading="lazy"><span><b>Sofa nap</b><small>5 s · 66 MB</small></span></button></li>
+            <li><button type="button" aria-current="false" data-scene="4dgs/cat1_5-10s/scene.json" data-poster="4dgs/cat1_5-10s/poster.jpg" data-status="5 seconds · 88 MB download" data-alt="A cat stretching on a sofa, captured as a moving Gaussian splat">
+              <img src="4dgs/cat1_5-10s/poster.jpg" alt="" width="1440" height="900" loading="lazy"><span><b>Sofa nap, later</b><small>5 s · 88 MB</small></span></button></li>
+            <li><button type="button" aria-current="false" data-scene="4dgs/cat3_0-5s/scene.json" data-poster="4dgs/cat3_0-5s/poster.jpg" data-status="5 seconds · 82 MB download" data-alt="Two kittens playing on a sofa, captured as a moving Gaussian splat">
+              <img src="4dgs/cat3_0-5s/poster.jpg" alt="" width="1440" height="900" loading="lazy"><span><b>Two kittens</b><small>5 s · 82 MB</small></span></button></li>
+          </ul>
         </div>
       </div>
       <div class="text">
