@@ -50,5 +50,9 @@
     0.0909
    ]
   }
+ },
+ "orbit": {
+  "mode": "window",
+  "margin": 3
  }
 }

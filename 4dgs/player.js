@@ -219,6 +219,8 @@ class Player {
     app.root.addChild(camera);
     const controls = this.controls = camera.script.create(CameraControls);
     controls.moveSpeed = 1; controls.focusDamping = 0.9;
+    // viewers only orbit and zoom; no flying or panning away from the filmed views
+    controls.enableFly = false; controls.middleButton = 'none'; controls.rightButton = 'none';
     this.content = new pc.Entity('content');
     app.root.addChild(this.content);
     this.cache = new Map(); this.loading = new Map(); this.chain = Promise.resolve();
@@ -235,9 +237,42 @@ class Player {
     this.content.setLocalPosition(0, 0, 0);
     const damping = this.controls.focusDamping;
     if (instant) this.controls.focusDamping = 0;
+    this.freeOrbit();
     this.controls.reset(target, position);
+    this.limitOrbit(name);
     if (instant) setTimeout(() => { this.controls.focusDamping = damping; }, 50);
     for (const b of this.root.querySelectorAll('[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === name));
+  }
+
+  // A 4D splat from a few fixed cameras is only right near where they stood, so the view is kept there.
+  // scene.json "orbit": {"mode": "window", "margin": 3}  each View is its own small window (default)
+  //                     {"mode": "arc",    "margin": 12} the whole arc between the cameras (when it's been checked)
+  //                     {"mode": "free"}                 no limit
+  viewAngles(v) {
+    const pc = this.pc, t = new pc.Vec3(...v.target), p = new pc.Vec3(...v.position);
+    p.add(p.clone().sub(t).mulScalar(0.03));
+    const d = t.clone().sub(p).normalize(), deg = 180 / Math.PI;
+    return { yaw: Math.atan2(-d.x, -d.z) * deg, pitch: -Math.atan2(-d.y, Math.hypot(d.x, d.z)) * deg, dist: t.distance(p) };
+  }
+
+  freeOrbit() {
+    const pc = this.pc, c = this.controls;
+    c.yawRange = new pc.Vec2(-360, 360); c.pitchRange = new pc.Vec2(-360, 360); c.zoomRange = new pc.Vec2(0.01, 0);
+  }
+
+  limitOrbit(name) {
+    const o = { mode: 'window', ...(this.scene.orbit || {}) };
+    if (o.mode === 'free') return;
+    const pc = this.pc, c = this.controls, near = this.viewAngles(this.scene.views[name]).yaw;
+    const views = o.mode === 'arc' ? Object.values(this.scene.views) : [this.scene.views[name]];
+    const m = o.margin ?? (o.mode === 'arc' ? 12 : 3);
+    const a = views.map((v) => this.viewAngles(v));
+    const ys = a.map((x) => x.yaw + 360 * Math.round((near - x.yaw) / 360));   // continuous around the current view
+    c.yawRange = new pc.Vec2(Math.min(...ys) - m, Math.max(...ys) + m);
+    const ps = a.map((x) => x.pitch);
+    c.pitchRange = new pc.Vec2(Math.max(-89, Math.min(...ps) - m), Math.min(89, Math.max(...ps) + m));
+    const ds = a.map((x) => x.dist);
+    c.zoomRange = new pc.Vec2(Math.min(...ds) * (o.mode === 'arc' ? 0.6 : 0.85), Math.max(...ds) * (o.mode === 'arc' ? 1.2 : 1.1));
   }
 
   load(k) {
