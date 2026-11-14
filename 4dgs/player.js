@@ -2,7 +2,9 @@
 // Nothing heavy loads until the visitor presses "View in 3D".
 const PC = 'https://cdn.jsdelivr.net/npm/playcanvas@2.24.1/build/playcanvas.min.mjs';
 const CONTROLS = 'https://cdn.jsdelivr.net/npm/playcanvas@2.24.1/scripts/esm/camera-controls.mjs';
-const AHEAD = 6, BEHIND = 1;
+// phones get a smaller look-ahead and pixel ratio: iOS gives each tab little memory
+const SMALL = matchMedia('(pointer: coarse)').matches || (navigator.deviceMemory || 8) <= 4;
+const AHEAD = SMALL ? 3 : 6, BEHIND = 1;
 
 const mb = (b) => `${Math.round(b / 2 ** 20)} MB`;
 const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -144,13 +146,14 @@ class Player {
       this.scene = scene;
       const [pc, { CameraControls }] = await Promise.all([import(PC), import(CONTROLS)]);
       this.pc = pc;
+      // open the 3D view before downloading: a phone may refuse a new graphics context once memory is full
+      await this.initViewer(CameraControls);
+      if (gen !== this.gen) return;
       const dec = await fetchF4D((scene.parts || [scene.file]).map((p) => new URL(p, this.sceneUrl)), scene.bytes,
         (p) => { if (gen !== this.gen) return; this.$('.s4d-bar > div').style.width = `${Math.round(p * 100)}%`; this.$('.s4d-status').textContent = `Loading ${Math.round(p * 100)}%`; });
       if (gen !== this.gen) return;
       this.$('.s4d-status').textContent = 'Preparing…';
       this.dec = dec;
-      await this.initViewer(CameraControls);
-      if (gen !== this.gen) return;
       this.root.classList.remove('is-loading');
       this.root.classList.add('is-live');
       this.frames = dec.h.frames;
@@ -164,16 +167,21 @@ class Player {
       this.render();
     } catch (e) {
       if (gen !== this.gen) return;
-      this.root.classList.remove('is-loading');
-      this.$('.s4d-status').textContent = `Couldn’t start the 3D view. ${e.message}`;
-      btn.disabled = false;
+      this.teardown();
+      this.$('.s4d-status').textContent = e.noDevice
+        ? 'This device couldn’t open a 3D view. Close other tabs and try again. On iPhone, Lockdown Mode turns 3D off.'
+        : `Couldn’t start the 3D view. ${e.message}`;
     }
   }
 
   async initViewer(CameraControls) {
     const pc = this.pc, canvas = this.$('.s4d-canvas');
-    const device = await pc.createGraphicsDevice(canvas, { deviceTypes: ['webgl2'], antialias: false });
-    device.maxPixelRatio = Math.min(devicePixelRatio, 2);
+    let device;
+    for (const o of [{ antialias: false, powerPreference: 'high-performance' }, {}]) {    // retry with plain settings
+      try { device = await pc.createGraphicsDevice(canvas, { deviceTypes: ['webgl2'], ...o }); break; } catch {}
+    }
+    if (!device) throw Object.assign(new Error('No graphics device.'), { noDevice: true });
+    device.maxPixelRatio = Math.min(devicePixelRatio, SMALL ? 1.5 : 2);
     const opts = new pc.AppOptions();
     opts.graphicsDevice = device;
     opts.componentSystems = [pc.CameraComponentSystem, pc.ScriptComponentSystem, pc.GSplatComponentSystem];
