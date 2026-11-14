@@ -1,0 +1,40 @@
+/* 4DGS player: sits in a .feature card's .shot slot and uses the site's tokens. */
+.s4d { position: relative; aspect-ratio: 16 / 10; border-radius: var(--r-lg); overflow: clip; background: #0b0b0c;
+  --s4d-bg: #0b0b0c; box-shadow: 0 0 0 1px var(--sep) inset; }
+.s4d-poster, .s4d-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.s4d-poster { object-fit: cover; filter: var(--img-filter); transition: opacity var(--dur-base) var(--ease-out); }
+.s4d-canvas { touch-action: none; outline: none; cursor: grab; }
+.s4d-canvas:active { cursor: grabbing; }
+.s4d.is-live .s4d-poster { opacity: 0; pointer-events: none; }
+
+.s4d-cover { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: var(--space-3);
+  background: linear-gradient(180deg, rgb(0 0 0 / 0) 40%, rgb(0 0 0 / .45)); color: #fff; text-align: center; }
+.s4d.is-live .s4d-cover { display: none; }
+.s4d-start { gap: 8px; }
+.s4d-start:disabled { opacity: .7; cursor: progress; }
+.s4d-note { font-size: var(--t-cap); color: rgb(255 255 255 / .85); }
+.s4d-status { font-size: var(--t-cap); color: rgb(255 255 255 / .9); min-height: 1.2em; }
+.s4d-bar { width: 220px; height: 4px; border-radius: 2px; background: rgb(255 255 255 / .25); overflow: hidden; display: none; }
+.s4d-bar > div { height: 100%; width: 0; background: #fff; transition: width var(--dur-fast) linear; }
+.s4d.is-loading .s4d-bar { display: block; }
+
+.s4d-controls { position: absolute; left: var(--space-3); right: var(--space-3); bottom: var(--space-3); display: none;
+  align-items: center; gap: var(--space-2); padding: 6px 10px 6px 6px; border-radius: var(--r-full); color: #f5f5f7;
+  background: rgb(22 22 24 / .62); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); }
+.s4d.is-live .s4d-controls { display: flex; }
+.s4d-controls button { min-height: 32px; min-width: 32px; padding: 0 12px; border: 0; border-radius: var(--r-full);
+  background: rgb(255 255 255 / .12); color: inherit; font: 500 .8125rem/1 var(--sans); cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out); }
+.s4d-controls button:hover { background: rgb(255 255 255 / .2); }
+.s4d-controls button[aria-pressed="true"] { background: #fff; color: #1d1d1f; }
+.s4d-play { padding: 0 !important; width: 32px; background: var(--accent) !important; color: var(--on-accent) !important; }
+.s4d-play::before { content: "❚❚"; font-size: .7rem; letter-spacing: -1px; }
+.s4d-play[data-state="paused"]::before { content: "▶"; font-size: .8rem; }
+.s4d-scrub { flex: 1; min-width: 60px; accent-color: #fff; }
+.s4d-time { font: 500 .75rem/1 var(--sans); font-variant-numeric: tabular-nums; white-space: nowrap; opacity: .85; }
+.s4d-hint { position: absolute; top: var(--space-3); left: 50%; transform: translateX(-50%); display: none; padding: 5px 12px;
+  border-radius: var(--r-full); font-size: .75rem; color: #f5f5f7; background: rgb(22 22 24 / .55); pointer-events: none; white-space: nowrap; }
+.s4d.is-live .s4d-hint { display: block; animation: s4d-fade 5s var(--ease-out) forwards; }
+@keyframes s4d-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+@media (max-width: 560px) { .s4d-time { display: none; } .s4d-controls button { padding: 0 9px; } }
+@media (prefers-reduced-motion: reduce) { .s4d.is-live .s4d-hint { animation: none; } }
