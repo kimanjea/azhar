@@ -36,6 +36,18 @@
   border-radius: var(--r-full); font-size: .75rem; color: #f5f5f7; background: rgb(22 22 24 / .55); pointer-events: none; white-space: nowrap; }
 .s4d.is-live .s4d-hint { display: block; animation: s4d-fade 5s var(--ease-out) forwards; }
 @keyframes s4d-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+.s4d-tools { position: absolute; top: var(--space-3); right: var(--space-3); display: none; gap: 6px; z-index: 2; }
+.s4d.is-live .s4d-tools { display: flex; }
+.s4d-tools button { width: 34px; height: 34px; padding: 0; display: grid; place-items: center; border: 0; border-radius: var(--r-full);
+  color: #f5f5f7; background: rgb(22 22 24 / .62); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
+  cursor: pointer; transition: background var(--dur-fast) var(--ease-out); }
+.s4d-tools button:hover { background: rgb(60 60 64 / .75); }
+.s4d-tools button[aria-pressed="true"] { background: #fff; color: #1d1d1f; }
+.s4d-tools svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+/* full screen: the real thing where the browser allows it, a full-window view on iPhone (no element full screen there) */
+.s4d:fullscreen, .s4d.is-full { aspect-ratio: auto; width: 100vw; height: 100vh; border-radius: 0; }
+.s4d.is-full { position: fixed; inset: 0; z-index: 1000; height: 100dvh; }
+html.s4d-noscroll, html.s4d-noscroll body { overflow: hidden; }
 @media (max-width: 560px) { .s4d-time { display: none; } .s4d-controls button { padding: 0 9px; } }
 @media (prefers-reduced-motion: reduce) { .s4d.is-live .s4d-hint { animation: none; } }
 

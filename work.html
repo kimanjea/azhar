@@ -190,23 +190,30 @@
 
     <article class="feature reveal" id="4dgs" aria-labelledby="s4d-title">
       <div class="shot s4d-shot">
-        <div class="s4d" data-splat4d data-scene="4dgs/flame_steak/scene.json">
-          <img class="s4d-poster" src="4dgs/flame_steak/poster.jpg" alt="A cook searing steak with a blowtorch, captured as a moving Gaussian splat" width="1440" height="900" loading="lazy">
+        <div class="s4d" data-splat4d data-autoload data-scene="4dgs/flame_steak_10s/scene.json">
+          <img class="s4d-poster" src="4dgs/flame_steak_10s/poster.jpg" alt="A cook searing steak with a blowtorch, captured as a moving Gaussian splat" width="1440" height="900" loading="lazy">
           <canvas class="s4d-canvas" tabindex="0" aria-label="Interactive 3D view. Drag to look around, scroll to zoom, Space to play or pause, arrow keys to step."></canvas>
           <div class="s4d-cover">
             <button class="btn btn-primary s4d-start" type="button">View in 3D</button>
             <div class="s4d-bar" aria-hidden="true"><div></div></div>
-            <p class="s4d-status" role="status">2 seconds · 15 MB download</p>
+            <p class="s4d-status" role="status">10 seconds · 38 MB download</p>
+          </div>
+          <div class="s4d-tools">
+            <button type="button" class="s4d-reset" aria-label="Back to the first view and moment" title="Back to the first view and moment (R)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 6.2A5.2 5.2 0 1 1 3 9.6"/><path d="M3 2.8v3.6h3.6"/></svg></button>
+            <button type="button" class="s4d-limit" aria-pressed="true" aria-label="Filmed views only" title="Filmed views only: stay where the cameras filmed. Turn off to look from anywhere (L)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 11.5a6.5 6.5 0 0 1 11 0"/><path d="M8 13.5V9.2M8 9.2 5.4 4.6M8 9.2l2.6-4.6"/><circle cx="8" cy="13.5" r=".9"/></svg></button>
+            <button type="button" class="s4d-spin" aria-pressed="false" aria-label="Turn around slowly" title="Turn around slowly (S)"><svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="8" rx="6.2" ry="2.6"/><path d="M12.6 4.6l1.6.8-.9 1.5"/><circle cx="8" cy="8" r="1.4"/></svg></button>
+            <button type="button" class="s4d-full" aria-pressed="false" aria-label="Full screen" title="Full screen (F)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5L9 7M2.5 13.5L7 9"/></svg></button>
           </div>
           <p class="s4d-hint" aria-hidden="true">Drag to look around · Scroll to zoom</p>
           <div class="s4d-controls">
             <button class="s4d-play" type="button" aria-label="Pause"></button>
-            <input class="s4d-scrub" type="range" min="0" max="59" value="0" aria-label="Moment">
+            <input class="s4d-scrub" type="range" min="0" max="299" value="0" aria-label="Moment">
             <span class="s4d-time">0:00</span>
             <button type="button" data-view="cam1" aria-pressed="true">View 1</button>
             <button type="button" data-view="cam2" aria-pressed="false">View 2</button>
             <button type="button" data-view="cam3" aria-pressed="false">View 3</button>
             <button type="button" data-view="cam4" aria-pressed="false">View 4</button>
+            <button type="button" class="s4d-tilt" aria-pressed="false" hidden>Tilt</button>
           </div>
         </div>
       </div>
@@ -214,13 +221,14 @@
         <p class="kicker caption">R&amp;D · SplatPipe · 2026</p>
         <h3 id="s4d-title">4DGS: Moving Gaussian Splats</h3>
         <p class="meta">Real moments, captured in 3D and replayed in time</p>
-        <p>The future of cognitive decision-making training lies in 4DGS: real people and real moments, captured as they happen, that you can step into and study from any angle. This 2-second clip was trained with my own pipeline, SplatPipe, from four fixed cameras.</p>
+        <p>The future of cognitive decision-making training lies in 4DGS: real people and real moments, captured as they happen, that you can step into and study from any angle. This 10-second clip was trained with my own pipeline, SplatPipe, from four fixed cameras.</p>
         <p class="meta">Try it</p>
         <ul class="points">
-          <li>Press <strong>View in 3D</strong>. It loads in the page, no app needed.</li>
-          <li>Drag to shift your viewpoint and scroll or pinch to zoom.</li>
+          <li>It loads by itself in the page, no app needed.</li>
+          <li>Drag to shift your viewpoint and scroll or pinch to zoom. On a phone, tilt it to look around (on iPhone, tap <strong>Tilt</strong> first); on a computer, move the pointer across the scene. <strong>Tilt</strong> turns this on or off.</li>
           <li>Use play, pause and the slider to move through time. Pause on any moment and look around it.</li>
           <li><strong>View 1</strong> to <strong>View 4</strong> jump to where each of the four cameras stood.</li>
+          <li>Top right: back to the first view and moment, filmed views only (turn it off to look from anywhere), turn around slowly, and full screen.</li>
           <li>On a keyboard, Space plays or pauses and the arrow keys step one moment.</li>
         </ul>
         <p class="meta">Footage: <a href="https://github.com/facebookresearch/Neural_3D_Video">Neural 3D Video dataset</a> (Li et al., CVPR 2022, Meta), <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>. Trained by me into a 4D Gaussian splat with SplatPipe.</p>

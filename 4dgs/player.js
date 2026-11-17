@@ -22,7 +22,7 @@ const HALF = (() => {
 
 const gunzip = async (u8) => new Uint8Array(await new Response(new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
 
-async function fetchF4D(urls, total, onProgress) {
+async function download(urls, total, onProgress) {
   // the file is stored in parts (GitHub limits file size): download them back to back into one buffer
   let got = 0;
   const chunks = [];
@@ -36,9 +36,80 @@ async function fetchF4D(urls, total, onProgress) {
       chunks.push(value); got += value.byteLength; onProgress(Math.min(1, got / total));
     }
   }
-  let file = new Uint8Array(got);
+  const file = new Uint8Array(got);
   for (let o = 0, i = 0; i < chunks.length; o += chunks[i].byteLength, i++) file.set(chunks[i], o);
   chunks.length = 0;
+  return file;
+}
+
+// F4D3 (compact website form, made by SplatPipe's web4d.py): the base splat is a .sog file, unpacked by PlayCanvas;
+// each moment holds 1-byte changes of the moving splats only, relative to the moment before (every key_every-th
+// moment relative to the base, so the player can jump anywhere).
+async function fetchF4D3(pc, app, urls, total, sogUrl, onProgress) {
+  const file = await download(urls, total, onProgress);
+  if (String.fromCharCode(...file.subarray(0, 4)) !== 'F4D3') throw new Error('Not a 4D file.');
+  const hl = new DataView(file.buffer, file.byteOffset).getUint32(4, true);
+  const h = JSON.parse(new TextDecoder().decode(file.subarray(8, 8 + hl)));
+  let off = 8 + hl;
+  const blocks = h.z_bytes.map((sz) => { const b = file.subarray(off, off + sz); off += sz; return b; });
+  const mvBytes = await gunzip(blocks[0]);
+  const mv = new Uint32Array(mvBytes.buffer.slice(mvBytes.byteOffset, mvBytes.byteOffset + mvBytes.byteLength));
+  const asset = new pc.Asset('f4d-base', 'gsplat', { url: sogUrl }, { decompress: true });
+  app.assets.add(asset);
+  await new Promise((ok, no) => { asset.once('load', ok); asset.once('error', (e) => no(new Error(String(e)))); app.assets.load(asset); });
+  const gd = asset.resource.gsplatData;
+  // phones skip the view-dependent colour detail (SH), as for the other format
+  const props = h.props.filter((p) => !(SMALL && p.startsWith('f_rest')) && gd.getProp(p));
+  const base = props.map((p) => gd.getProp(p));
+  app.assets.remove(asset);
+  return { v3: true, h, base, props, mv, blocks, state: null };
+}
+
+async function buildFrame3(pc, dec, k) {
+  const { h, base, props, mv } = dec, M = mv.length, n = h.splats, key = h.key_every || h.frames;
+  const ix = Object.fromEntries(props.map((p, i) => [p, i]));
+  const groups = Object.entries(h.groups);
+  let st = dec.state;
+  if (!st || st.k >= k || Math.floor(st.k / key) !== Math.floor(k / key)) {
+    // start a fresh run at the keyframe before k (moving values = the base)
+    st = { k: k - (k % key) - 1, vals: {} };
+    for (const [g, cols] of groups) st.vals[g] = cols.map((c) => { const a = new Float32Array(M), b = base[ix[c]]; for (let i = 0; i < M; i++) a[i] = b[mv[i]]; return a; });
+  }
+  for (let j = st.k + 1; j <= k; j++) {
+    const blk = await gunzip(dec.blocks[1 + j]);
+    let tot = 0; for (const [, cols] of groups) tot += cols.length * M;
+    const d8 = new Int8Array(blk.buffer, blk.byteOffset, tot);
+    const dv = new DataView(blk.buffer, blk.byteOffset);
+    const ne = dv.getUint32(tot, true), esc = new Map();
+    for (let e = 0; e < ne; e++) esc.set(dv.getUint32(tot + 4 + 4 * e, true), dv.getInt16(tot + 4 + 4 * ne + 2 * e, true));
+    const fromBase = j % key === 0;
+    let pos = 0;
+    for (const [g, cols] of groups) {
+      const step = h.steps[g];
+      cols.forEach((c, ci) => {
+        const a = st.vals[g][ci], b = base[ix[c]];
+        for (let i = 0; i < M; i++, pos++) {
+          let d = d8[pos]; if (d === -128) d = esc.get(pos) ?? 0;
+          a[i] = (fromBase ? b[mv[i]] : a[i]) + d * step;
+        }
+      });
+    }
+    st.k = j;
+  }
+  dec.state = st;
+  const storage = base.slice();
+  for (const [g, cols] of groups) cols.forEach((c, ci) => {
+    const i = ix[c]; if (i === undefined) return;
+    const a = base[i].slice(), v = st.vals[g][ci];
+    for (let m = 0; m < M; m++) a[mv[m]] = v[m];
+    storage[i] = a;
+  });
+  return new pc.GSplatData([{ name: 'vertex', count: n,
+    properties: props.map((name, c) => ({ type: 'float', name, storage: storage[c], byteSize: 4 })) }]);
+}
+
+async function fetchF4D(urls, total, onProgress) {
+  let file = await download(urls, total, onProgress);
 
   // F4D2 (web form): base and each frame compressed on their own, so frames stay small until shown.
   // F4D1: one compressed stream; unpacked whole.
@@ -101,6 +172,160 @@ class Player {
       if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { this.playing = false; this.seek(this.i + (e.key === 'ArrowRight' ? 1 : -1)); this.render(); }
     });
     this.initMore();
+    this.initTilt();
+    this.initTools();
+    // data-autoload: start loading as soon as the page has loaded (skipped when the visitor asked to save data)
+    if ('autoload' in root.dataset && !navigator.connection?.saveData) {
+      const go = () => setTimeout(() => this.start(), 300);
+      document.readyState === 'complete' ? go() : addEventListener('load', go, { once: true });
+    }
+  }
+
+  // Tilt to look: on phones and tablets, tilting the device swings the view around the current camera view,
+  // inside the same limits as dragging. Android starts it by itself; iPhone asks permission on a tap of "Tilt".
+  initTilt() {
+    this.tilt = { on: false, base: null, yaw: 0, pitch: 0, ty: 0, tp: 0 };
+    const btn = this.$('.s4d-tilt');
+    const touch = matchMedia('(pointer: coarse)').matches;
+    if (!btn) return;
+    if (!touch) return this.initMouseTilt(btn);
+    if (typeof DeviceOrientationEvent === 'undefined') { btn.remove(); return; }
+    btn.hidden = false;
+    const needsAsk = typeof DeviceOrientationEvent.requestPermission === 'function';
+    const listen = () => {
+      if (this.tiltListening) return;
+      this.tiltListening = true;
+      addEventListener('deviceorientation', (e) => this.onTilt(e));
+      addEventListener('orientationchange', () => { this.tilt.base = null; });
+    };
+    const set = (on) => { this.tilt.on = on; this.tilt.base = null; btn.setAttribute('aria-pressed', String(on)); if (on) listen(); };
+    btn.addEventListener('click', async () => {
+      if (this.tilt.on) return set(false);
+      if (needsAsk) {
+        try { if (await DeviceOrientationEvent.requestPermission() !== 'granted') return; } catch { return; }
+      }
+      set(true);
+    });
+    if (!needsAsk && !reduceMotion) set(true);
+  }
+
+  // Laptops and PCs (no gyroscope): the pointer's position over the clip tilts the view the same way.
+  // Holding a button to drag turns it off for that moment, so dragging behaves exactly as before.
+  initMouseTilt(btn) {
+    btn.hidden = false;
+    const t = this.tilt;
+    const set = (on) => { t.on = on; t.ty = t.tp = 0; btn.setAttribute('aria-pressed', String(on)); };
+    btn.addEventListener('click', () => set(!t.on));
+    this.root.addEventListener('pointermove', (e) => {
+      if (!t.on || e.pointerType !== 'mouse') return;
+      if (e.buttons) { t.ty = t.yaw; t.tp = t.pitch; return; }        // dragging: hold the tilt where it is
+      const r = this.root.getBoundingClientRect(), m = this.tiltRange();
+      const nx = Math.max(-1, Math.min(1, (e.clientX - r.left) / r.width * 2 - 1));
+      const ny = Math.max(-1, Math.min(1, (e.clientY - r.top) / r.height * 2 - 1));
+      t.ty = nx * m; t.tp = -ny * m * 0.6;
+    });
+    this.root.addEventListener('pointerleave', () => { t.ty = 0; t.tp = 0; });
+    set(!reduceMotion);
+  }
+
+  onTilt(e) {
+    const t = this.tilt;
+    if (!t.on || e.beta == null || e.gamma == null) return;
+    // device tilt in the screen's own frame, so landscape works too
+    const a = (screen.orientation?.angle ?? window.orientation ?? 0) * Math.PI / 180;
+    const x = e.gamma * Math.cos(a) + e.beta * Math.sin(a), y = e.beta * Math.cos(a) - e.gamma * Math.sin(a);
+    if (!t.base) { t.base = { x, y }; return; }
+    const m = this.tiltRange();
+    const k = 0.6;                                  // degrees of view per degree of tilt
+    t.ty = Math.max(-m, Math.min(m, (x - t.base.x) * k));
+    t.tp = Math.max(-m, Math.min(m, (y - t.base.y) * k));
+  }
+
+  // The Review page's viewer tools, on the website too
+  initTools() {
+    this.limitOn = true; this.spinOn = false; this.spinYaw = 0; this.spinPhase = 0;
+    const on = (sel, fn) => this.$(sel)?.addEventListener('click', fn);
+    on('.s4d-reset', () => this.live && this.resetView());
+    on('.s4d-limit', () => this.live && this.setLimit(!this.limitOn));
+    on('.s4d-spin', () => this.live && this.setSpin(!this.spinOn));
+    on('.s4d-full', () => this.toggleFull());
+    // grabbing the view stops the slow turn, as on the Review page
+    this.root.addEventListener('pointerdown', (e) => { if (this.spinOn && e.target.classList.contains('s4d-canvas')) this.setSpin(false); });
+    this.root.addEventListener('wheel', () => this.spinOn && this.setSpin(false), { passive: true });
+    const sync = () => {
+      const full = document.fullscreenElement === this.root || document.webkitFullscreenElement === this.root || this.root.classList.contains('is-full');
+      this.$('.s4d-full')?.setAttribute('aria-pressed', String(full));
+    };
+    document.addEventListener('fullscreenchange', sync); document.addEventListener('webkitfullscreenchange', sync);
+    this.root.addEventListener('keydown', (e) => {
+      if (!this.live || e.target.tagName === 'INPUT') return;
+      const k = e.key.toLowerCase();
+      if (k === 'f') this.toggleFull();
+      else if (k === 'r') this.resetView();
+      else if (k === 'l') this.setLimit(!this.limitOn);
+      else if (k === 's') this.setSpin(!this.spinOn);
+      else if (k === 'escape' && this.root.classList.contains('is-full')) this.toggleFull();
+    });
+  }
+
+  resetView() { this.setSpin(false); this.goTo('cam1'); this.playing = !reduceMotion; this.seek(0); this.render(); }
+
+  setLimit(on) {
+    this.limitOn = on;
+    this.$('.s4d-limit')?.setAttribute('aria-pressed', String(on));
+    if (on) this.limitOrbit(this.view || 'cam1'); else this.freeOrbit();
+    this.spinYaw = 0;
+  }
+
+  setSpin(on) {
+    this.spinOn = on && !reduceMotion;
+    this.$('.s4d-spin')?.setAttribute('aria-pressed', String(this.spinOn));
+    if (!this.spinOn) this.spinPhase = 0;
+  }
+
+  toggleFull() {
+    const r = this.root, doc = document;
+    const native = doc.fullscreenElement === r || doc.webkitFullscreenElement === r;
+    if (native) { (doc.exitFullscreen || doc.webkitExitFullscreen).call(doc); return; }
+    if (r.classList.contains('is-full')) {
+      r.classList.remove('is-full'); doc.documentElement.classList.remove('s4d-noscroll');
+      this.$('.s4d-full')?.setAttribute('aria-pressed', 'false'); return;
+    }
+    const req = r.requestFullscreen || r.webkitRequestFullscreen;
+    if (req) req.call(r).catch?.(() => this.fakeFull());
+    else this.fakeFull();
+  }
+
+  fakeFull() {      // iPhone Safari: no full screen for page elements, so fill the window instead
+    this.root.classList.add('is-full'); document.documentElement.classList.add('s4d-noscroll');
+    this.$('.s4d-full')?.setAttribute('aria-pressed', 'true');
+  }
+
+  spinRange() {
+    const o = { mode: 'window', ...(this.scene?.orbit || {}) };
+    if (o.mode !== 'arc') return o.margin ?? 3;
+    const ys = Object.values(this.scene.views).map((v) => this.viewAngles(v).yaw);
+    return Math.max(o.margin ?? 12, (Math.max(...ys) - Math.min(...ys)) / 2 + (o.margin ?? 12) / 2);
+  }
+
+  tiltRange() { return Math.min(25, (this.scene?.orbit?.margin ?? 3)); }
+
+  // turn the clip about the point the current view looks at: the same as the camera swinging around it
+  applyTilt(dt = 0) {
+    const t = this.tilt, pc = this.pc;
+    if (!this.content || !this.pivot || !pc) return;
+    const goal = t.on ? 1 : 0;
+    t.yaw += ((t.ty * goal) - t.yaw) * 0.15; t.pitch += ((t.tp * goal) - t.pitch) * 0.15;
+    if (this.spinOn) {
+      if (this.limitOn) { this.spinPhase += dt * 0.35; this.spinYaw = this.spinRange() * Math.sin(this.spinPhase); }
+      else this.spinYaw = (this.spinYaw + dt * 8) % 360;
+    } else if (this.limitOn) this.spinYaw *= 0.9;
+    if (Math.abs(t.yaw) < 1e-3 && Math.abs(t.pitch) < 1e-3 && !t.on && Math.abs(this.spinYaw) < 1e-3 && !this.spinOn) return;
+    const right = this.camera.right.clone();
+    const q = new pc.Quat().setFromAxisAngle(pc.Vec3.UP, -(t.yaw + this.spinYaw)).mul(new pc.Quat().setFromAxisAngle(right, -t.pitch));
+    const off = q.transformVector(this.pivot.clone().mulScalar(-1)).add(this.pivot);
+    this.content.setLocalRotation(q);
+    this.content.setLocalPosition(off);
   }
 
   // "More 4D clips": swap which clip this player shows
@@ -149,6 +374,7 @@ class Player {
   }
 
   async start() {
+    if (this.live || this.root.classList.contains('is-loading')) return;
     const btn = this.$('.s4d-start'), gen = ++this.gen;
     btn.disabled = true;
     this.root.classList.add('is-loading');
@@ -161,8 +387,11 @@ class Player {
       // open the 3D view before downloading: a phone may refuse a new graphics context once memory is full
       await this.initViewer(CameraControls);
       if (gen !== this.gen) return;
-      const dec = await fetchF4D((scene.parts || [scene.file]).map((p) => new URL(p, this.sceneUrl)), scene.bytes,
-        (p) => { if (gen !== this.gen) return; this.$('.s4d-bar > div').style.width = `${Math.round(p * 100)}%`; this.$('.s4d-status').textContent = `Loading ${Math.round(p * 100)}%`; });
+      const urls = (scene.parts || [scene.file]).map((p) => new URL(p, this.sceneUrl));
+      const progress = (p) => { if (gen !== this.gen) return; this.$('.s4d-bar > div').style.width = `${Math.round(p * 100)}%`; this.$('.s4d-status').textContent = `Loading ${Math.round(p * 100)}%`; };
+      const dec = scene.format === 'f4d3'
+        ? await fetchF4D3(this.pc, this.app, urls, scene.bytes, new URL(scene.base, this.sceneUrl).href, progress)
+        : await fetchF4D(urls, scene.bytes, progress);
       if (gen !== this.gen) return;
       this.$('.s4d-status').textContent = 'Preparing…';
       this.dec = dec;
@@ -203,7 +432,7 @@ class Player {
     const opts = new pc.AppOptions();
     opts.graphicsDevice = device;
     opts.componentSystems = [pc.CameraComponentSystem, pc.ScriptComponentSystem, pc.GSplatComponentSystem];
-    opts.resourceHandlers = [pc.GSplatHandler, pc.ScriptHandler];
+    opts.resourceHandlers = [pc.GSplatHandler, pc.ScriptHandler, pc.TextureHandler, pc.BinaryHandler, pc.JsonHandler];   // textures: the SOG base
     const app = this.app = new pc.AppBase(canvas);
     app.init(opts);
     app.setCanvasFillMode(pc.FILLMODE_NONE);
@@ -225,7 +454,7 @@ class Player {
     app.root.addChild(this.content);
     this.cache = new Map(); this.loading = new Map(); this.chain = Promise.resolve();
     this.i = 0; this.acc = 0;
-    app.on('update', (dt) => this.tick(dt));
+    app.on('update', (dt) => { this.applyTilt(dt); this.tick(dt); });
     app.start();
   }
 
@@ -235,11 +464,15 @@ class Player {
     const target = new pc.Vec3(...v.target), position = new pc.Vec3(...v.position);
     position.add(position.clone().sub(target).mulScalar(0.03));    // step back from blobs hugging the lens
     this.content.setLocalPosition(0, 0, 0);
+    this.content.setLocalRotation(0, 0, 0, 1);
+    this.pivot = target.clone();
+    if (this.tilt) this.tilt.base = null;
     const damping = this.controls.focusDamping;
     if (instant) this.controls.focusDamping = 0;
+    this.view = name;
     this.freeOrbit();
     this.controls.reset(target, position);
-    this.limitOrbit(name);
+    if (this.limitOn !== false) this.limitOrbit(name);
     if (instant) setTimeout(() => { this.controls.focusDamping = damping; }, 50);
     for (const b of this.root.querySelectorAll('[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === name));
   }
@@ -282,7 +515,7 @@ class Player {
     const p = this.chain.then(() => new Promise((r) => setTimeout(r, 0))).then(async () => {
       this.loading.delete(k);
       if (this.cache.has(k)) return this.cache.get(k);
-      const pc = this.pc, data = await buildFrame(pc, dec, k);
+      const pc = this.pc, data = dec.v3 ? await buildFrame3(pc, dec, k) : await buildFrame(pc, dec, k);
       if (dec !== this.dec || !this.app) throw new Error('stale');
       const res = new pc.GSplatResource(this.app.graphicsDevice, data);
       const e = new pc.Entity(`frame_${k}`);
