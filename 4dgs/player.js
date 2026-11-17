@@ -202,14 +202,25 @@ class Player {
       addEventListener('orientationchange', () => { this.tilt.base = null; });
     };
     const set = (on) => { this.tilt.on = on; this.tilt.base = null; btn.setAttribute('aria-pressed', String(on)); if (on) listen(); };
+    const ask = async () => {
+      if (!needsAsk) return true;
+      try { return await DeviceOrientationEvent.requestPermission() === 'granted'; } catch { return false; }
+    };
     btn.addEventListener('click', async () => {
-      if (this.tilt.on) return set(false);
-      if (needsAsk) {
-        try { if (await DeviceOrientationEvent.requestPermission() !== 'granted') return; } catch { return; }
-      }
-      set(true);
+      if (this.tilt.on) { this.tiltUserOff = true; return set(false); }
+      this.tiltUserOff = false;
+      if (await ask()) set(true);
     });
-    if (!needsAsk && !reduceMotion) set(true);
+    // Tilt is on by default. iPhone only shares motion after a tap, so it asks on the visitor's first tap anywhere.
+    if (!needsAsk) set(true);
+    else {
+      const first = async (e) => {
+        if (btn.contains(e.target)) return;                          // the Tilt button handles its own tap
+        removeEventListener('touchend', first, true); removeEventListener('click', first, true);
+        if (!this.tilt.on && !this.tiltUserOff && await ask()) set(true);
+      };
+      addEventListener('touchend', first, true); addEventListener('click', first, true);
+    }
   }
 
   // Laptops and PCs (no gyroscope): the pointer's position over the clip tilts the view the same way.
@@ -228,7 +239,7 @@ class Player {
       t.ty = nx * m; t.tp = -ny * m * 0.6;
     });
     this.root.addEventListener('pointerleave', () => { t.ty = 0; t.tp = 0; });
-    set(!reduceMotion);
+    set(true);                                                        // on by default
   }
 
   onTilt(e) {
@@ -272,77 +283,50 @@ class Player {
   }
 
   // ---- AR page ----
-  // Two ways to put the clip in the room, picked by what the phone can do:
-  //  - world: 8th Wall's engine tracks the phone in space (SLAM), so the scene stands life-size on the floor and you
-  //    can walk up to it and around it. Drag moves it across the floor, pinch resizes, twist turns it.
-  //  - look:  camera behind the clip and the motion sensors turn the view (no walking). Drag turns, pinch resizes.
-  // Splats outside scene.json "ar.crop" (the room's walls) are hidden in both.
+  // The phone's camera fills the screen behind the clip and the motion sensors turn the view.
+  // Screen: drag turns the scene, pinch resizes it. Hands (camera hand tracking, any browser): pinch in the air to grab;
+  // move to turn it, pull your hand in or push it out to bring it closer or farther; two hands resize and turn it.
+  // Splats outside scene.json "ar.crop" (the room's walls) are hidden.
   initAR() {
-    this.arState = { mode: null, q0: null, qRel: null, yaw: 0, zoom: 1.25, pts: new Map(), g: null,
-      place: null, wYaw: 0, wScale: 1, pose: null };
+    this.arState = { q0: null, qRel: null, yaw: 0, zoom: 1.25, pts: new Map(), g: null };
     const s = this.arState, cv = () => this.$('.s4d-canvas');
     this.$('.s4d-camera')?.addEventListener('click', () => this.startCamera());
-    this.$('.s4d-recenter')?.addEventListener('click', () => this.arRecenter());
+    this.$('.s4d-hands')?.addEventListener('click', () => this.toggleHands());
+    this.$('.s4d-flip')?.addEventListener('click', () => this.switchCamera());
+    this.root.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'h' && this.live) this.toggleHands(); });
     const two = () => { const [a, b] = [...s.pts.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y), ang: Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI }; };
-    const begin = () => {
-      s.g = s.pts.size === 2 ? { ...two(), zoom: s.zoom, wScale: s.wScale, wYaw: s.wYaw } : null;
-    };
+    const begin = () => { s.g = s.pts.size === 2 ? { ...two(), zoom: s.zoom, yaw: s.yaw } : null; };
     this.root.addEventListener('pointerdown', (e) => {
       if (!e.target.classList.contains('s4d-canvas')) return;
       cv().setPointerCapture?.(e.pointerId); s.pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); begin();
     });
     this.root.addEventListener('pointermove', (e) => {
       const p = s.pts.get(e.pointerId); if (!p) return;
-      const dx = e.clientX - p.x, dy = e.clientY - p.y;
+      const dx = e.clientX - p.x;
       p.x = e.clientX; p.y = e.clientY;
-      if (s.pts.size === 1) {
-        if (s.mode === 'world') this.arDrag(dx, dy); else s.yaw += dx * 0.4;
-      } else if (s.pts.size === 2 && s.g) {
-        const now = two(), k = now.d / Math.max(s.g.d, 1);
-        if (s.mode === 'world') {
-          s.wScale = Math.max(0.1, Math.min(3, s.g.wScale * k));
-          s.wYaw = s.g.wYaw - (now.ang - s.g.ang);              // twist turns it the way the fingers turn
-        } else s.zoom = Math.max(0.3, Math.min(3, s.g.zoom / k));
+      if (s.pts.size === 1) s.yaw += dx * 0.4;
+      else if (s.pts.size === 2 && s.g) {
+        const now = two();
+        s.zoom = Math.max(0.3, Math.min(3, s.g.zoom * s.g.d / Math.max(now.d, 1)));
+        s.yaw = s.g.yaw - (now.ang - s.g.ang);                    // twist turns it the way the fingers turn
       }
     });
     const up = (e) => { s.pts.delete(e.pointerId); begin(); };
     this.root.addEventListener('pointerup', up); this.root.addEventListener('pointercancel', up);
-    this.root.addEventListener('wheel', (e) => {
-      if (s.mode === 'world') s.wScale = Math.max(0.1, Math.min(3, s.wScale * (1 - e.deltaY * 0.001)));
-      else s.zoom = Math.max(0.3, Math.min(3, s.zoom * (1 + e.deltaY * 0.001)));
-      e.preventDefault();
-    }, { passive: false });
+    this.root.addEventListener('wheel', (e) => { s.zoom = Math.max(0.3, Math.min(3, s.zoom * (1 + e.deltaY * 0.001))); e.preventDefault(); }, { passive: false });
   }
 
-  arRecenter() {
-    const s = this.arState;
-    s.yaw = 0; s.zoom = 1.25; s.q0 = null; s.qRel = null;     // look mode
-    s.place = null; s.wYaw = 0; s.wScale = 1;                  // world mode: life-size, back in front of you
-  }
+  arRecenter() { const s = this.arState; s.yaw = 0; s.zoom = 1.25; s.q0 = null; s.qRel = null; }
 
   async startCamera() {
     const btn = this.$('.s4d-camera'), note = this.$('.s4d-camnote');
     btn.disabled = true;
     // iPhone asks for motion access only from a tap, so ask before anything else is awaited
-    const ask = (C) => C && typeof C.requestPermission === 'function' ? C.requestPermission().catch(() => 'denied') : Promise.resolve(C ? 'granted' : 'denied');
-    const orient = ask(typeof DeviceOrientationEvent !== 'undefined' ? DeviceOrientationEvent : null);
-    const motion = ask(typeof DeviceMotionEvent !== 'undefined' ? DeviceMotionEvent : null);
-    const [o, m] = await Promise.all([orient, motion]);
-    if (o === 'granted' && m === 'granted' && await this.startWorld()) {
-      const hint = this.$('.s4d-hint'); if (hint?.dataset.world) hint.textContent = hint.dataset.world;
-      this.root.classList.add('ar-on'); return;
-    }
-    // fallback: camera behind the clip, motion sensors turn the view
-    let camOk = false;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
-      const v = this.$('.s4d-cam'); v.srcObject = stream; await v.play();
-      this.root.classList.add('has-cam'); camOk = true;
-    } catch (e) {
-      if (note) note.textContent = 'The camera stayed off. Allow camera access for this site in your browser settings, then try again.';
-    }
-    this.arState.mode = 'look';
-    if (o === 'granted' && !this.arListening) {
+    const D = typeof DeviceOrientationEvent !== 'undefined' ? DeviceOrientationEvent : null;
+    const motion = D && typeof D.requestPermission === 'function' ? D.requestPermission().catch(() => 'denied') : Promise.resolve(D ? 'granted' : 'denied');
+    const camOk = await this.openCamera(this.camFacing || 'environment');
+    if (!camOk && note) note.textContent = 'The camera stayed off. Allow camera access for this site in your browser settings, then try again.';
+    if (await motion === 'granted' && !this.arListening) {
       this.arListening = true;
       addEventListener('deviceorientation', (e) => this.onAROrient(e));
       addEventListener('orientationchange', () => { this.arState.q0 = null; });
@@ -350,58 +334,99 @@ class Player {
     if (camOk) this.root.classList.add('ar-on'); else btn.disabled = false;
   }
 
-  // World tracking with the 8th Wall engine (loaded by ar.html). Resolves false when the phone or browser can't.
-  async startWorld() {
-    const ready = () => window.XR8 ? Promise.resolve(true) : new Promise((ok) => {
-      addEventListener('xrloaded', () => ok(true), { once: true }); setTimeout(() => ok(!!window.XR8), 20000);
-    });
-    if (!matchMedia('(pointer: coarse)').matches || !(await ready())) return false;
-    const XR8 = window.XR8, s = this.arState;
+  // open the front ("user") or back ("environment") camera; the front camera is shown like a mirror
+  async openCamera(facing) {
+    const v = this.$('.s4d-cam');
     try {
-      if (!XR8.XrDevice.isDeviceBrowserCompatible({ allowedDevices: XR8.XrConfig.device().MOBILE_AND_HEADSETS })) return false;
-      const feed = this.$('.s4d-feed'), dpr = Math.min(devicePixelRatio, 2);
-      const fit = () => { feed.width = Math.round(feed.clientWidth * dpr); feed.height = Math.round(feed.clientHeight * dpr); };
-      this.root.classList.add('has-feed'); fit();
-      const started = new Promise((ok) => {
-        XR8.addCameraPipelineModules([
-          XR8.GlTextureRenderer.pipelineModule(),          // draws the camera feed
-          XR8.XrController.pipelineModule(),               // tracks the phone in the room
-          { name: 'splat4d',
-            onStart: ({ canvasWidth, canvasHeight }) => {
-              // the floor is y = 0 and the phone starts about 1.4 m above it, so the room is in metres
-              XR8.XrController.updateCameraProjectionMatrix({
-                cam: { pixelRectWidth: canvasWidth, pixelRectHeight: canvasHeight, nearClipPlane: 0.02, farClipPlane: 100 },
-                origin: { x: 0, y: 1.4, z: 0 }, facing: { w: 1, x: 0, y: 0, z: 0 } });
-              ok(true);
-            },
-            onUpdate: ({ processCpuResult }) => { const r = processCpuResult?.reality; if (r) s.pose = r; },
-            onCameraStatusChange: ({ status }) => { if (status === 'failed') ok(false); },
-            onException: () => ok(false) },
-        ]);
-        XR8.run({ canvas: feed, allowedDevices: XR8.XrConfig.device().MOBILE_AND_HEADSETS });
-        setTimeout(() => ok(false), 25000);
-      });
-      if (!(await started)) { try { XR8.stop(); XR8.clearCameraPipelineModules(); } catch {} this.root.classList.remove('has-feed'); return false; }
-      addEventListener('resize', fit);
-      s.mode = 'world'; s.place = null;
-      this.camera.camera.calculateProjection = (mat) => { if (s.pose?.intrinsics) mat.set(s.pose.intrinsics); };
-      this.root.classList.add('ar-world');
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing } }, audio: false });
+      v.srcObject?.getTracks().forEach((t) => t.stop());
+      v.srcObject = stream; await v.play();
+      const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput').length;
+      // what the camera says it is; a lone camera that doesn't say (a laptop webcam) faces you
+      const actual = stream.getVideoTracks()[0]?.getSettings?.().facingMode || (cams > 1 ? facing : 'user');
+      this.camFacing = actual === 'environment' ? 'environment' : 'user';
+      this.camMirror = this.camFacing === 'user';
+      this.root.classList.toggle('cam-mirror', this.camMirror);
+      this.root.classList.toggle('has-cams', cams > 1);           // show "switch camera" only when there's another one
+      this.$('.s4d-flip')?.setAttribute('aria-label', this.camMirror ? 'Switch to the back camera' : 'Switch to the front camera');
+      this.root.classList.add('has-cam');
+      if (this.arState) { this.arState.q0 = null; }               // turn from here, not from where the old camera was
+      if (this.handsState) this.handsState.prev = new Map();
       return true;
-    } catch (e) {
-      this.root.classList.remove('has-feed');
-      return false;
-    }
+    } catch { return false; }
   }
 
-  // one finger in world mode: slide the scene across the floor, relative to where the phone faces
-  arDrag(dx, dy) {
-    const s = this.arState, pc = this.pc; if (!s.place || !s.pose) return;
-    const q = new pc.Quat(s.pose.rotation.x, s.pose.rotation.y, s.pose.rotation.z, s.pose.rotation.w);
-    const right = q.transformVector(new pc.Vec3(1, 0, 0)); right.y = 0; right.normalize();
-    const fwd = q.transformVector(new pc.Vec3(0, 0, -1)); fwd.y = 0; fwd.normalize();
-    const cam = new pc.Vec3(s.pose.position.x, s.pose.position.y, s.pose.position.z);
-    const k = Math.max(0.5, cam.distance(s.place)) * 2 / innerHeight;    // about a finger's worth of floor
-    s.place.add(right.mulScalar(dx * k)).add(fwd.mulScalar(-dy * k));
+  async switchCamera() {
+    if (!this.root.classList.contains('has-cam')) return this.startCamera();
+    const want = this.camFacing === 'environment' ? 'user' : 'environment';
+    const btn = this.$('.s4d-flip'); if (btn) btn.disabled = true;
+    await this.openCamera(want);
+    if (btn) btn.disabled = false;
+  }
+
+  // ---- hand tracking ----
+  async toggleHands() {
+    const btn = this.$('.s4d-hands'), h = this.handsState || (this.handsState = { on: false, tracker: null, prev: new Map(), grab: null, dots: [] });
+    if (h.on) { h.on = false; btn?.setAttribute('aria-pressed', 'false'); this.root.classList.remove('hands-on'); h.dots.forEach((d) => { d.hidden = true; }); return; }
+    if (!this.root.classList.contains('has-cam')) { await this.startCamera(); if (!this.root.classList.contains('has-cam')) return; }
+    btn?.setAttribute('aria-pressed', 'true'); this.root.classList.add('hands-on');
+    if (!h.tracker) {
+      this.root.classList.add('hands-loading');
+      try { h.tracker = await (await import(new URL('hands.js', import.meta.url).href)).createHandTracker(); }
+      catch (e) { this.root.classList.remove('hands-loading', 'hands-on'); btn?.setAttribute('aria-pressed', 'false'); this.$('.s4d-handnote') && (this.$('.s4d-handnote').textContent = 'Hand tracking couldn’t start in this browser.'); return; }
+      this.root.classList.remove('hands-loading');
+      for (let i = 0; i < 2; i++) { const d = document.createElement('div'); d.className = 's4d-handdot'; d.hidden = true; this.root.append(d); h.dots.push(d); }
+    }
+    h.on = true;
+    const loop = () => { if (!h.on) return; this.handsTick(); requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+  }
+
+  handsTick() {
+    const h = this.handsState, v = this.$('.s4d-cam');
+    if (!v || v.readyState < 2 || !v.videoWidth) return;
+    const now = performance.now();
+    if (now - (h.t || 0) < 45) return;                 // about 20 detections a second: smooth enough, kind to the battery
+    h.t = now;
+    let hands; try { hands = h.tracker.detect(v); } catch { return; }
+    if (!hands) return;
+    // camera image (0..1) -> screen, as object-fit: cover crops it
+    const W = this.root.clientWidth, H = this.root.clientHeight, k = Math.max(W / v.videoWidth, H / v.videoHeight);
+    const ox = (v.videoWidth * k - W) / 2, oy = (v.videoHeight * k - H) / 2;
+    const seen = hands.map((x) => {
+      const sx = (this.camMirror ? 1 - x.x : x.x) * v.videoWidth * k - ox, sy = x.y * v.videoHeight * k - oy, p = h.prev.get(x.id);
+      const pinching = p?.pinching ? x.pinch < 0.45 : x.pinch < 0.28;           // a little hysteresis, so a pinch holds
+      const a = p ? 0.5 : 1;                                                    // smooth the jitter
+      return { id: x.id, pinching, x: p ? p.x + (sx - p.x) * a : sx, y: p ? p.y + (sy - p.y) * a : sy,
+        size: p ? p.size + (x.size - p.size) * a : x.size };
+    });
+    h.dots.forEach((d, i) => {
+      const x = seen[i]; d.hidden = !x;
+      if (x) { d.style.transform = `translate(${x.x}px, ${x.y}px)`; d.classList.toggle('is-pinching', x.pinching); }
+    });
+    this.handsGesture(seen.filter((x) => x.pinching));
+    h.prev = new Map(seen.map((x) => [x.id, x]));
+  }
+
+  // pinch in the air = grab. One hand: move to turn, pull in / push out to bring it closer / farther. Two hands: resize and turn.
+  handsGesture(p) {
+    const h = this.handsState, s = this.arState, g = h.grab;
+    const key = p.map((x) => x.id).sort().join('+');
+    if (!p.length || !g || g.key !== key) {                       // a grab starts, ends or changes hands
+      h.grab = p.length ? { key, hands: p, yaw: s.yaw, zoom: s.zoom } : null;
+      return;
+    }
+    if (p.length === 1) {
+      const a = p[0], a0 = g.hands[0];
+      s.yaw = g.yaw + (a.x - a0.x) * 0.4;
+      s.zoom = Math.max(0.3, Math.min(3, g.zoom * a0.size / a.size));      // hand nearer the camera = pull it in
+    } else {
+      const [a, b] = p, [a0, b0] = g.hands;
+      const d = Math.hypot(a.x - b.x, a.y - b.y), d0 = Math.hypot(a0.x - b0.x, a0.y - b0.y);
+      const ang = Math.atan2(b.y - a.y, b.x - a.x), ang0 = Math.atan2(b0.y - a0.y, b0.x - a0.x);
+      s.zoom = Math.max(0.3, Math.min(3, g.zoom * d0 / Math.max(d, 1)));    // hands apart = bigger
+      s.yaw = g.yaw - (ang - ang0) * 180 / Math.PI;                         // steering-wheel turn
+    }
   }
 
   onAROrient(e) {
@@ -435,21 +460,18 @@ class Player {
     const k = this.scene.ar?.crop; if (!k) return;
     const { raw } = this.arFrame(), { e, f, r, u } = raw;
     const X = data.getProp('x'), Y = data.getProp('y'), Z = data.getProp('z'), O = data.getProp('opacity');
-    const boost = this.scene.ar.opacityBoost ?? 0, big = Math.log(k.maxScale ?? 1e9);
-    const S0 = data.getProp('scale_0'), S1 = data.getProp('scale_1'), S2 = data.getProp('scale_2');
+    const boost = this.scene.ar.opacityBoost ?? 0;
     if (!X || !O) return;
     for (let i = 0; i < O.length; i++) {
       const dx = X[i] - e.x, dy = Y[i] - e.y, dz = Z[i] - e.z;
       const z = dx * f.x + dy * f.y + dz * f.z, x = dx * r.x + dy * r.y + dz * r.z, y = dx * u.x + dy * u.y + dz * u.z;
-      if (z < k.near || z > k.far || x < k.x[0] || x > k.x[1] || y < k.y[0] || y > k.y[1]
-          || (S0 && Math.max(S0[i], S1[i], S2[i]) > big)) O[i] = -40;     // walls, and long smears that only read on black
+      if (z < k.near || z > k.far || x < k.x[0] || x > k.x[1] || y < k.y[0] || y > k.y[1]) O[i] = -40;   // the room's walls
       else O[i] += boost;                         // denser: a sparse splat lets the camera show through it
     }
   }
 
   arUpdate() {
     if (!this.camera || !this.content || !this.scene?.ar) return;
-    if (this.arState.mode === 'world') return this.arWorldUpdate();
     const pc = this.pc, s = this.arState, { e, T } = this.arFrame();
     const back = e.clone().sub(T), dist = back.length() * s.zoom;
     this.camera.setPosition(T.clone().add(back.normalize().mulScalar(dist)));
@@ -461,50 +483,10 @@ class Player {
     this.content.setLocalPosition(T.clone().sub(q.transformVector(T)));
   }
 
-  // world mode: the phone's tracked pose drives the camera; the scene stands on the floor, life-size
-  arWorldUpdate() {
-    const pc = this.pc, s = this.arState, a = this.scene.ar, p = s.pose; if (!p) return;
-    this.camera.setPosition(p.position.x, p.position.y, p.position.z);
-    this.camera.setRotation(new pc.Quat(p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w));
-    const cam = this.camera.getPosition().clone();
-    const fwd = this.camera.forward.clone(); fwd.y = 0;
-    if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
-    fwd.normalize();
-    if (!s.place) {                                   // start (and Recenter): on the floor, in front of the phone
-      s.place = cam.clone().add(fwd.clone().mulScalar(a.placeDistance ?? 2.5)); s.place.y = 0;
-      s.face = Math.atan2(-fwd.x, -fwd.z) * 180 / Math.PI;   // the filmed front faces you
-    }
-    const w = this.arWorld || (this.arWorld = this.arAlign());
-    if (this.spinOn) s.wYaw = (s.wYaw + 0.25) % 360;   // "turn around slowly"
-    const q = new pc.Quat().setFromAxisAngle(pc.Vec3.UP, s.face + s.wYaw).mul(w.q);
-    const k = (a.metersPerUnit ?? 0.1) * s.wScale;
-    this.content.setLocalScale(k, k, k);
-    this.content.setLocalRotation(q);
-    this.content.setLocalPosition(s.place.clone().sub(q.transformVector(w.foot.clone().mulScalar(k))));
-  }
-
-  // how far a camera's view is turned from camera 1's, about the scene's up (degrees, as the scene stands in AR)
+  // how far a camera's view is turned from camera 1's, about the scene's up (degrees)
   viewHeading(name) {
-    const pc = this.pc, w = this.arWorld || (this.arWorld = this.arAlign());
-    const head = (n) => { const v = this.scene.views[n]; const f = w.q.transformVector(new pc.Vec3(...v.target).sub(new pc.Vec3(...v.position)));
-      return Math.atan2(-f.x, -f.z) * 180 / Math.PI; };
+    const head = (n) => { const v = this.scene.views[n]; return Math.atan2(-(v.target[0] - v.position[0]), -(v.target[2] - v.position[2])) * 180 / Math.PI; };
     return head(name) - head(this.scene.ar?.view || 'cam1');
-  }
-
-  // turn the scene so its floor is level and camera 1's view looks along -Z; "foot" is the floor point under the subject
-  arAlign() {
-    const pc = this.pc, a = this.scene.ar, v = this.scene.views[a.view || 'cam1'], { e, T } = this.arFrame();
-    const U = new pc.Vec3(...v.up).normalize();
-    const f = new pc.Vec3(...v.target).sub(e);
-    const fh = f.clone().sub(U.clone().mulScalar(f.dot(U))).normalize();
-    const r = new pc.Vec3().cross(fh, U).normalize();
-    const m = new pc.Mat4(), d = m.data;                       // rows r, U, -fh: scene -> upright local
-    d[0] = r.x; d[4] = r.y; d[8] = r.z;
-    d[1] = U.x; d[5] = U.y; d[9] = U.z;
-    d[2] = -fh.x; d[6] = -fh.y; d[10] = -fh.z;
-    const q = new pc.Quat().setFromMat4(m);
-    const foot = T.clone().add(U.clone().mulScalar((a.floor ?? -10) - T.clone().sub(e).dot(U)));
-    return { q, foot };
   }
 
   resetView() { this.setSpin(false); if (this.ar) this.arRecenter(); this.goTo('cam1'); this.playing = !reduceMotion; this.seek(0); this.render(); }
@@ -704,9 +686,9 @@ class Player {
   goTo(name, instant = false) {
     const v = this.scene.views[name]; if (!v) return;
     const pc = this.pc;
-    if (this.ar && this.arState?.mode) {          // AR: turn the scene so this camera's angle faces you
+    if (this.ar && this.root.classList.contains('ar-on')) {          // AR: turn the scene so this camera's angle faces you
       const s = this.arState, h = this.viewHeading(name);
-      if (s.mode === 'world') s.wYaw = -h; else s.yaw = -h;
+      s.yaw = -h;
       this.view = name;
       for (const b of this.root.querySelectorAll('[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === name));
       return;

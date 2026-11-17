@@ -110,9 +110,6 @@
     4
    ]
   },
-  "opacityBoost": 2.0,
-  "metersPerUnit": 0.113,
-  "floor": -14.1,
-  "placeDistance": 2.5
+  "opacityBoost": 2.0
  }
 }
