@@ -160,6 +160,7 @@ class Player {
     this.sceneUrl = new URL(root.dataset.scene, location.href);
     this.$ = (s) => root.querySelector(s);
     this.gen = 0; this.live = false; this.visible = true;
+    this.ar = 'ar' in root.dataset;             // full-screen AR page: live camera behind the clip
     this.$('.s4d-start').addEventListener('click', () => this.start());
     // controls are wired once; they act only while a clip is live
     new IntersectionObserver(([e]) => { this.visible = e.isIntersecting; }).observe(root);
@@ -174,6 +175,7 @@ class Player {
     this.initMore();
     this.initTilt();
     this.initTools();
+    if (this.ar) this.initAR();
     // data-autoload: start loading as soon as the page has loaded (skipped when the visitor asked to save data)
     if ('autoload' in root.dataset && !navigator.connection?.saveData) {
       const go = () => setTimeout(() => this.start(), 300);
@@ -266,6 +268,110 @@ class Player {
       else if (k === 's') this.setSpin(!this.spinOn);
       else if (k === 'escape' && this.root.classList.contains('is-full')) this.toggleFull();
     });
+  }
+
+  // ---- AR page ----
+  // The phone's camera fills the screen behind the clip; turning the phone turns the view (motion sensors),
+  // drag turns the scene, pinch resizes it. Splats outside scene.json "ar.crop" (the room's walls) are hidden.
+  initAR() {
+    this.arState = { q0: null, qRel: null, yaw: 0, zoom: 1.25, pts: new Map(), pinch: null };
+    const s = this.arState, cv = () => this.$('.s4d-canvas');
+    this.$('.s4d-camera')?.addEventListener('click', () => this.startCamera());
+    this.$('.s4d-recenter')?.addEventListener('click', () => { s.q0 = null; s.qRel = null; s.yaw = 0; s.zoom = 1.25; });
+    this.root.addEventListener('pointerdown', (e) => {
+      if (!e.target.classList.contains('s4d-canvas')) return;
+      cv().setPointerCapture?.(e.pointerId); s.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (s.pts.size === 2) { const [a, b] = [...s.pts.values()]; s.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: s.zoom }; }
+    });
+    this.root.addEventListener('pointermove', (e) => {
+      const p = s.pts.get(e.pointerId); if (!p) return;
+      if (s.pts.size === 1) s.yaw += (e.clientX - p.x) * 0.4;
+      p.x = e.clientX; p.y = e.clientY;
+      if (s.pts.size === 2 && s.pinch) {
+        const [a, b] = [...s.pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
+        s.zoom = Math.max(0.3, Math.min(3, s.pinch.z * s.pinch.d / Math.max(d, 1)));
+      }
+    });
+    const up = (e) => { s.pts.delete(e.pointerId); if (s.pts.size < 2) s.pinch = null; };
+    this.root.addEventListener('pointerup', up); this.root.addEventListener('pointercancel', up);
+    this.root.addEventListener('wheel', (e) => { s.zoom = Math.max(0.3, Math.min(3, s.zoom * (1 + e.deltaY * 0.001))); e.preventDefault(); }, { passive: false });
+  }
+
+  async startCamera() {
+    const btn = this.$('.s4d-camera'), note = this.$('.s4d-camnote');
+    btn.disabled = true;
+    // iPhone asks for motion access only from a tap, so ask before anything else is awaited
+    const D = typeof DeviceOrientationEvent !== 'undefined' ? DeviceOrientationEvent : null;
+    const motion = D && typeof D.requestPermission === 'function' ? D.requestPermission().catch(() => 'denied') : Promise.resolve(D ? 'granted' : 'denied');
+    let camOk = false;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      const v = this.$('.s4d-cam'); v.srcObject = stream; await v.play();
+      this.root.classList.add('has-cam'); camOk = true;
+    } catch (e) {
+      if (note) note.textContent = 'The camera stayed off. Allow camera access for this site in your browser settings, then try again.';
+    }
+    if (await motion === 'granted' && !this.arListening) {
+      this.arListening = true;
+      addEventListener('deviceorientation', (e) => this.onAROrient(e));
+      addEventListener('orientationchange', () => { this.arState.q0 = null; });
+    }
+    if (camOk) this.root.classList.add('ar-on'); else btn.disabled = false;
+  }
+
+  onAROrient(e) {
+    if (e.alpha == null || !this.pc) return;
+    const pc = this.pc, s = this.arState, d = Math.PI / 180;
+    // device orientation -> camera rotation (Y-X-Z), then from "lying flat" to "held up", then the screen's rotation
+    const x = e.beta * d / 2, y = e.alpha * d / 2, z = -e.gamma * d / 2;
+    const c1 = Math.cos(x), c2 = Math.cos(y), c3 = Math.cos(z), s1 = Math.sin(x), s2 = Math.sin(y), s3 = Math.sin(z);
+    const q = new pc.Quat(s1 * c2 * c3 + c1 * s2 * s3, c1 * s2 * c3 - s1 * c2 * s3, c1 * c2 * s3 - s1 * s2 * c3, c1 * c2 * c3 + s1 * s2 * s3);
+    q.mul(new pc.Quat(-Math.SQRT1_2, 0, 0, Math.SQRT1_2));
+    const o = -(screen.orientation?.angle ?? window.orientation ?? 0) * d / 2;
+    q.mul(new pc.Quat(0, 0, Math.sin(o), Math.cos(o)));
+    if (!s.q0) s.q0 = q.clone().invert();
+    s.qRel = s.q0.clone().mul(q);
+  }
+
+  arFrame() {
+    // camera 1's frame in world space, and in the splats' own space (before the scene rotation)
+    if (this.arF) return this.arF;
+    const pc = this.pc, a = this.scene.ar, v = this.scene.views[a.view || 'cam1'];
+    const e = new pc.Vec3(...v.position), f = new pc.Vec3(...v.target).sub(e).normalize();
+    const r = new pc.Vec3().cross(f, new pc.Vec3(...v.up)).normalize(), u = new pc.Vec3().cross(r, f);
+    const c = a.center || [0, 0, 10];
+    const T = e.clone().add(f.clone().mulScalar(c[2])).add(r.clone().mulScalar(c[0])).add(u.clone().mulScalar(c[1]));
+    const rt = this.scene.rotation, qi = new pc.Quat(rt[0], rt[1], rt[2], rt[3]).invert();
+    const raw = { e: qi.transformVector(e), f: qi.transformVector(f), r: qi.transformVector(r), u: qi.transformVector(u) };
+    return (this.arF = { e, T, raw });
+  }
+
+  arCrop(data) {
+    const k = this.scene.ar?.crop; if (!k) return;
+    const { raw } = this.arFrame(), { e, f, r, u } = raw;
+    const X = data.getProp('x'), Y = data.getProp('y'), Z = data.getProp('z'), O = data.getProp('opacity');
+    const boost = this.scene.ar.opacityBoost ?? 0, big = Math.log(k.maxScale ?? 1e9);
+    const S0 = data.getProp('scale_0'), S1 = data.getProp('scale_1'), S2 = data.getProp('scale_2');
+    if (!X || !O) return;
+    for (let i = 0; i < O.length; i++) {
+      const dx = X[i] - e.x, dy = Y[i] - e.y, dz = Z[i] - e.z;
+      const z = dx * f.x + dy * f.y + dz * f.z, x = dx * r.x + dy * r.y + dz * r.z, y = dx * u.x + dy * u.y + dz * u.z;
+      if (z < k.near || z > k.far || x < k.x[0] || x > k.x[1] || y < k.y[0] || y > k.y[1]
+          || (S0 && Math.max(S0[i], S1[i], S2[i]) > big)) O[i] = -40;     // walls, and long smears that only read on black
+      else O[i] += boost;                         // denser: a sparse splat lets the camera show through it
+    }
+  }
+
+  arUpdate() {
+    if (!this.camera || !this.content || !this.scene?.ar) return;
+    const pc = this.pc, s = this.arState, { e, T } = this.arFrame();
+    const back = e.clone().sub(T), dist = back.length() * s.zoom;
+    this.camera.setPosition(T.clone().add(back.normalize().mulScalar(dist)));
+    this.camera.lookAt(T, pc.Vec3.UP);
+    if (s.qRel) this.camera.setRotation(this.camera.getRotation().clone().mul(s.qRel));
+    const q = new pc.Quat().setFromAxisAngle(pc.Vec3.UP, s.yaw);
+    this.content.setLocalRotation(q);
+    this.content.setLocalPosition(T.clone().sub(q.transformVector(T)));
   }
 
   resetView() { this.setSpin(false); this.goTo('cam1'); this.playing = !reduceMotion; this.seek(0); this.render(); }
@@ -422,7 +528,7 @@ class Player {
     for (const o of [{ deviceTypes: ['webgl2'], antialias: false, powerPreference: 'high-performance' },
                      { deviceTypes: ['webgl2'] }, { deviceTypes: ['webgpu'] }]) {
       if (o.deviceTypes[0] === 'webgpu' && !navigator.gpu) continue;
-      try { device = await pc.createGraphicsDevice(canvas, o); if (device) break; } catch (e) { why = e?.message || String(e); }
+      try { device = await pc.createGraphicsDevice(canvas, this.ar ? { ...o, alpha: true, premultipliedAlpha: true } : o); if (device) break; } catch (e) { why = e?.message || String(e); }
     }
     if (!device) {
       const gl = (() => { try { return document.createElement('canvas').getContext('webgl2') ? 'WebGL 2 works' : 'WebGL 2 unavailable'; } catch { return 'WebGL 2 blocked'; } })();
@@ -444,6 +550,7 @@ class Player {
     fit();
     const bg = getComputedStyle(this.root).getPropertyValue('--s4d-bg').trim() || '#0b0b0c';
     const c = new pc.Color(); c.fromString(bg);
+    if (this.ar) c.a = 0;                        // see-through, so the camera shows behind the splats
     const camera = this.camera = new pc.Entity('camera');
     camera.addComponent('camera', { clearColor: c, fov: this.scene.fov || 40, nearClip: 0.01, farClip: 1000 });
     camera.addComponent('script');
@@ -452,11 +559,12 @@ class Player {
     controls.moveSpeed = 1; controls.focusDamping = 0.9;
     // viewers only orbit and zoom; no flying or panning away from the filmed views
     controls.enableFly = false; controls.middleButton = 'none'; controls.rightButton = 'none';
+    if (this.ar) controls.enabled = false;       // AR: the phone's motion and the AR gestures move the view
     this.content = new pc.Entity('content');
     app.root.addChild(this.content);
     this.cache = new Map(); this.loading = new Map(); this.chain = Promise.resolve();
     this.i = 0; this.acc = 0;
-    app.on('update', (dt) => { this.applyTilt(dt); this.tick(dt); });
+    app.on('update', (dt) => { if (this.ar) this.arUpdate(); else this.applyTilt(dt); this.tick(dt); });
     app.start();
   }
 
@@ -519,6 +627,7 @@ class Player {
       if (this.cache.has(k)) return this.cache.get(k);
       const pc = this.pc, data = dec.v3 ? await buildFrame3(pc, dec, k) : await buildFrame(pc, dec, k);
       if (dec !== this.dec || !this.app) throw new Error('stale');
+      if (this.ar) this.arCrop(data);
       const res = new pc.GSplatResource(this.app.graphicsDevice, data);
       const e = new pc.Entity(`frame_${k}`);
       e.addComponent('gsplat');

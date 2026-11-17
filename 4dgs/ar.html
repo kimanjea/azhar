@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<title>4DGS in AR · Azhar Amir Kimanje</title>
+<meta name="description" content="A 4D Gaussian splat of a cook searing steak, played over your phone's live camera. Trained by Azhar Amir Kimanje with SplatPipe.">
+<link rel="stylesheet" href="../styles/site.css">
+<link rel="stylesheet" href="player.css">
+<script type="importmap">{ "imports": { "playcanvas": "https://cdn.jsdelivr.net/npm/playcanvas@2.24.1/build/playcanvas.min.mjs" } }</script>
+<script type="module" src="player.js"></script>
+</head>
+<body class="ar-page">
+<main class="s4d s4d-arview" data-splat4d data-autoload data-ar data-scene="flame_steak_10s/scene.json">
+  <video class="s4d-cam" playsinline muted autoplay aria-hidden="true"></video>
+  <img class="s4d-poster" src="flame_steak_10s/poster.jpg" alt="A cook searing steak with a blowtorch" width="1440" height="900">
+  <canvas class="s4d-canvas" tabindex="0" aria-label="The 4D scene over your camera. Turn your phone to look around, drag to turn the scene, pinch to resize."></canvas>
+  <div class="s4d-cover">
+    <button class="btn btn-primary s4d-start" type="button">View in 3D</button>
+    <div class="s4d-bar" aria-hidden="true"><div></div></div>
+    <p class="s4d-status" role="status">10 seconds · 38 MB download</p>
+  </div>
+  <a class="s4d-close" href="../work.html#4dgs" aria-label="Back to the portfolio"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></a>
+  <div class="s4d-campanel">
+    <p class="s4d-camtitle">See it in your space</p>
+    <p class="s4d-camnote">Turns on your camera and motion sensors. Nothing is recorded or sent anywhere.</p>
+    <button class="btn btn-primary s4d-camera" type="button">Turn on camera</button>
+  </div>
+  <p class="s4d-hint" aria-hidden="true">Turn your phone to look around · Drag to turn · Pinch to resize</p>
+  <div class="s4d-controls">
+    <button class="s4d-play" type="button" aria-label="Pause"></button>
+    <input class="s4d-scrub" type="range" min="0" max="299" value="0" aria-label="Moment">
+    <span class="s4d-time">0:00</span>
+    <button type="button" class="s4d-recenter">Recenter</button>
+  </div>
+</main>
+</body>
+</html>

@@ -90,5 +90,26 @@
  "orbit": {
   "mode": "arc",
   "margin": 10
+ },
+ "ar": {
+  "view": "cam1",
+  "center": [
+   3.3,
+   -3.5,
+   13.8
+  ],
+  "crop": {
+   "near": 4,
+   "far": 16.4,
+   "x": [
+    -9,
+    8
+   ],
+   "y": [
+    -9,
+    4
+   ]
+  },
+  "opacityBoost": 2.0
  }
 }
