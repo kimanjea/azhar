@@ -107,5 +107,11 @@ body.ar-page { margin: 0; background: #000; overscroll-behavior: none; }
 .s4d-arview.is-live .s4d-campanel { display: grid; }
 .s4d-arview.ar-on .s4d-campanel { display: none; }
 .s4d-arview .s4d-controls { bottom: calc(env(safe-area-inset-bottom) + 12px); }
-.s4d-arview .s4d-hint { top: calc(env(safe-area-inset-top) + 18px); }
+.s4d-arview .s4d-hint { top: calc(env(safe-area-inset-top) + 64px); max-width: calc(100% - 32px); white-space: normal; text-align: center; }
 .s4d-arview:not(.ar-on) .s4d-hint { display: none; }
+/* world tracking: 8th Wall draws the camera into .s4d-feed, under the splats */
+.s4d-feed { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
+.s4d-arview.has-feed .s4d-feed { display: block; }
+.s4d-arview.has-feed .s4d-poster, .s4d-arview.has-feed .s4d-cam { display: none; }
+.s4d-credit { font-size: .6875rem; opacity: .65; margin-top: 4px !important; }
+.s4d-credit a { color: inherit; }
