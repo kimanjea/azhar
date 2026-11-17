@@ -437,8 +437,10 @@ class Player {
     app.init(opts);
     app.setCanvasFillMode(pc.FILLMODE_NONE);
     app.setCanvasResolution(pc.RESOLUTION_AUTO);
-    const fit = () => app.resizeCanvas(canvas.clientWidth, canvas.clientHeight);
-    (this.resize = new ResizeObserver(fit)).observe(canvas);
+    // Let CSS size the canvas (100% of the player) and only match the drawing buffer to it.
+    // app.resizeCanvas() would pin inline pixel sizes, so full screen stayed at the card size in a corner.
+    const fit = () => { canvas.style.width = ''; canvas.style.height = ''; app.updateCanvasSize(); };
+    (this.resize = new ResizeObserver(fit)).observe(this.root);
     fit();
     const bg = getComputedStyle(this.root).getPropertyValue('--s4d-bg').trim() || '#0b0b0c';
     const c = new pc.Color(); c.fromString(bg);
