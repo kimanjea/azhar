@@ -176,7 +176,8 @@ class Player {
     this.initMore();
     this.initTilt();
     this.initTools();
-    if (this.ar) this.initAR();
+    // Passthrough, hand tracking and Instructor mode: on the AR page, and on any player that has their buttons
+    if (this.ar || root.querySelector('.s4d-pass, .s4d-hands, .s4d-teach')) this.initAR();
     // data-autoload: start loading as soon as the page has loaded (skipped when the visitor asked to save data)
     if ('autoload' in root.dataset && !navigator.connection?.saveData) {
       const go = () => setTimeout(() => this.start(), 300);
@@ -290,19 +291,27 @@ class Player {
   initAR() {
     this.arState = { q0: null, qRel: null, yaw: 0, zoom: 1.25, pts: new Map(), g: null };
     const s = this.arState, cv = () => this.$('.s4d-canvas');
-    this.$('.s4d-camera')?.addEventListener('click', () => this.startCamera());
+    // pieces the camera features need, added if the page doesn't have them (e.g. the Work page's player)
+    const add = (sel, html, before) => { if (!this.$(sel)) { const t = document.createElement('template'); t.innerHTML = html; before ? this.$(before).before(t.content) : this.root.append(t.content); } };
+    add('.s4d-cam', '<video class="s4d-cam" playsinline muted autoplay aria-hidden="true"></video>', '.s4d-canvas');
+    add('.s4d-occ', '<canvas class="s4d-occ" aria-hidden="true"></canvas>');
+    add('.s4d-handnote', '<p class="s4d-handnote" role="status"></p>');
+    add('.s4d-handhint', '<p class="s4d-handhint" aria-hidden="true">Pinch in the air to grab · Two hands to resize and turn</p>');
+    add('.s4d-teachhint', '<p class="s4d-teachhint" aria-hidden="true">Instructor mode · Your hands show in front of the scene</p>');
+    this.$('.s4d-camera')?.addEventListener('click', () => this.setPass(true));
+    this.$('.s4d-pass')?.addEventListener('click', () => this.setPass(!this.pass));
     this.$('.s4d-hands')?.addEventListener('click', () => this.toggleHands());
     this.$('.s4d-teach')?.addEventListener('click', () => this.toggleTeach());
     this.$('.s4d-flip')?.addEventListener('click', () => this.switchCamera());
     this.root.addEventListener('keydown', (e) => {
       if (!this.live) return;
       const k = e.key.toLowerCase();
-      if (k === 'h') this.toggleHands(); else if (k === 'i') this.toggleTeach();
+      if (k === 'h') this.toggleHands(); else if (k === 'i') this.toggleTeach(); else if (k === 'p') this.setPass(!this.pass);
     });
     const two = () => { const [a, b] = [...s.pts.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y), ang: Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI }; };
     const begin = () => { s.g = s.pts.size === 2 ? { ...two(), zoom: s.zoom, yaw: s.yaw } : null; };
     this.root.addEventListener('pointerdown', (e) => {
-      if (!e.target.classList.contains('s4d-canvas')) return;
+      if (!this.lookMode || !e.target.classList.contains('s4d-canvas')) return;     // otherwise the usual orbit controls
       cv().setPointerCapture?.(e.pointerId); s.pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); begin();
     });
     this.root.addEventListener('pointermove', (e) => {
@@ -318,26 +327,77 @@ class Player {
     });
     const up = (e) => { s.pts.delete(e.pointerId); begin(); };
     this.root.addEventListener('pointerup', up); this.root.addEventListener('pointercancel', up);
-    this.root.addEventListener('wheel', (e) => { s.zoom = Math.max(0.3, Math.min(3, s.zoom * (1 + e.deltaY * 0.001))); e.preventDefault(); }, { passive: false });
+    this.root.addEventListener('wheel', (e) => { if (!this.lookMode) return; s.zoom = Math.max(0.3, Math.min(3, s.zoom * (1 + e.deltaY * 0.001))); e.preventDefault(); }, { passive: false });
   }
 
   arRecenter() { const s = this.arState; s.yaw = 0; s.zoom = 1.25; s.q0 = null; s.qRel = null; }
 
-  async startCamera() {
-    const btn = this.$('.s4d-camera'), note = this.$('.s4d-camnote');
-    btn.disabled = true;
+  // The look view (framed from camera 1; your gestures, hands and, in passthrough, the phone's motion move it) is on
+  // whenever passthrough, hand tracking or Instructor mode is; on the AR page it's always on.
+  get lookMode() { return this.ar || !!(this.pass || this.vis?.want.hands || this.vis?.want.cut); }
+
+  updateMode() {
+    const look = this.lookMode;
+    if (this.controls) this.controls.enabled = !look;            // the usual orbit controls when nothing's on
+    if (look && !this.wasLook) { this.arRecenter(); this.content?.setLocalPosition(0, 0, 0); this.content?.setLocalRotation(0, 0, 0, 1); }
+    if (!look && this.wasLook) { this.content?.setLocalPosition(0, 0, 0); this.content?.setLocalRotation(0, 0, 0, 1); this.goTo(this.view || 'cam1', true); }
+    this.wasLook = look;
+    this.root.classList.toggle('look-on', look);
+    // the camera runs only while something needs it
+    const need = this.pass || this.vis?.want.hands || this.vis?.want.cut;
+    if (!need && this.root.classList.contains('cam-on')) this.closeCamera();
+  }
+
+  // Passthrough: your room behind the 4DGS, the view turning with your phone, and the 4DGS's own walls cut away
+  async setPass(on) {
+    const btn = this.$('.s4d-pass'), cbtn = this.$('.s4d-camera'), note = this.$('.s4d-camnote') || this.$('.s4d-handnote');
+    if (!on) {
+      this.pass = false; this.arState.q0 = null; this.arState.qRel = null;
+      this.root.classList.remove('has-cam', 'ar-on', 'pass-on'); btn?.setAttribute('aria-pressed', 'false');
+      this.setClear(); this.reloadFrames(); this.updateMode();
+      if (this.root.classList.contains('cam-on') && this.camFacing === 'environment') await this.openCamera('user', false);  // tracking faces you
+      return;
+    }
+    if (cbtn) cbtn.disabled = true;
     // iPhone asks for motion access only from a tap, so ask before anything else is awaited
     const D = typeof DeviceOrientationEvent !== 'undefined' ? DeviceOrientationEvent : null;
     const motion = D && typeof D.requestPermission === 'function' ? D.requestPermission().catch(() => 'denied') : Promise.resolve(D ? 'granted' : 'denied');
-    // AR shows the room: the back camera unless the visitor picked the front one while in AR
-    const camOk = await this.openCamera(this.arFacing || 'environment', true);
-    if (!camOk && note) note.textContent = 'The camera stayed off. Allow camera access for this site in your browser settings, then try again.';
+    // the room: the back camera unless the visitor picked the front one in passthrough
+    const ok = await this.openCamera(this.arFacing || 'environment', true);
+    if (cbtn) cbtn.disabled = false;
+    if (!ok) { if (note) note.textContent = 'The camera stayed off. Allow camera access for this site in your browser settings, then try again.'; return; }
     if (await motion === 'granted' && !this.arListening) {
       this.arListening = true;
       addEventListener('deviceorientation', (e) => this.onAROrient(e));
       addEventListener('orientationchange', () => { this.arState.q0 = null; });
     }
-    if (camOk) this.root.classList.add('ar-on'); else btn.disabled = false;
+    this.pass = true;
+    this.root.classList.add('ar-on', 'pass-on'); btn?.setAttribute('aria-pressed', 'true');
+    this.setClear(); this.reloadFrames(); this.updateMode();
+  }
+  startCamera() { return this.setPass(true); }
+
+  // see-through only in passthrough, so the room shows behind the splats
+  setClear() {
+    if (!this.camera || !this.pc) return;
+    const bg = getComputedStyle(this.root).getPropertyValue('--s4d-bg').trim() || '#0b0b0c';
+    const c = new this.pc.Color(); c.fromString(bg); if (this.pass) c.a = 0;
+    this.camera.camera.clearColor = c;
+  }
+
+  // the room's walls are cut away only in passthrough, so rebuild the cached moments when it changes
+  reloadFrames() {
+    if (!this.cache || !this.live) return;
+    for (const f of this.cache.values()) { f.e.destroy(); f.res.destroy?.(); }
+    this.cache.clear(); this.dec.state = null;
+    this.seek(this.i);
+  }
+
+  closeCamera() {
+    const v = this.$('.s4d-cam');
+    v?.srcObject?.getTracks().forEach((t) => t.stop());
+    if (v) v.srcObject = null;
+    this.root.classList.remove('cam-on', 'has-cam');
   }
 
   // open the front ("user") or back ("environment") camera; the front camera is shown like a mirror.
@@ -367,7 +427,7 @@ class Player {
   }
 
   async switchCamera() {
-    if (!this.root.classList.contains('cam-on')) return this.startCamera();
+    if (!this.root.classList.contains('cam-on')) return this.setPass(true);
     const want = this.camFacing === 'environment' ? 'user' : 'environment';
     const btn = this.$('.s4d-flip'); if (btn) btn.disabled = true;
     await this.openCamera(want, this.root.classList.contains('has-cam'));
@@ -409,6 +469,7 @@ class Player {
     if (!on) {
       if (kind === 'hands') { v.grab = null; v.prev = new Map(); v.dots.forEach((d) => { d.hidden = true; }); }
       else v.cuts = [];
+      this.updateMode();
       return;
     }
     if (note) note.textContent = '';
@@ -422,6 +483,7 @@ class Player {
       if (note) note.textContent = kind === 'hands' ? 'Hand tracking couldn’t start in this browser.' : 'Instructor mode couldn’t start in this browser.';
       return;
     } finally { this.root.classList.remove('vision-loading'); }
+    this.updateMode();
     if (!v.dots.length) for (let i = 0; i < 2; i++) { const d = document.createElement('div'); d.className = 's4d-handdot'; d.hidden = true; this.root.append(d); v.dots.push(d); }
     if (!v.loop) { v.loop = true; const loop = () => { this.visionTick(); requestAnimationFrame(loop); }; requestAnimationFrame(loop); }
   }
@@ -604,7 +666,7 @@ class Player {
     const back = e.clone().sub(T), dist = back.length() * s.zoom;
     this.camera.setPosition(T.clone().add(back.normalize().mulScalar(dist)));
     this.camera.lookAt(T, pc.Vec3.UP);
-    if (s.qRel) this.camera.setRotation(this.camera.getRotation().clone().mul(s.qRel));
+    if (s.qRel && this.pass) this.camera.setRotation(this.camera.getRotation().clone().mul(s.qRel));
     if (this.spinOn) s.yaw = (s.yaw + 0.25) % 360;
     const q = new pc.Quat().setFromAxisAngle(pc.Vec3.UP, s.yaw);
     this.content.setLocalRotation(q);
@@ -617,7 +679,7 @@ class Player {
     return head(name) - head(this.scene.ar?.view || 'cam1');
   }
 
-  resetView() { this.setSpin(false); if (this.ar) this.arRecenter(); this.goTo('cam1'); this.playing = !reduceMotion; this.seek(0); this.render(); }
+  resetView() { this.setSpin(false); if (this.lookMode) this.arRecenter(); this.goTo('cam1'); this.playing = !reduceMotion; this.seek(0); this.render(); }
 
   setLimit(on) {
     this.limitOn = on;
@@ -771,7 +833,7 @@ class Player {
     for (const o of [{ deviceTypes: ['webgl2'], antialias: false, powerPreference: 'high-performance' },
                      { deviceTypes: ['webgl2'] }, { deviceTypes: ['webgpu'] }]) {
       if (o.deviceTypes[0] === 'webgpu' && !navigator.gpu) continue;
-      try { device = await pc.createGraphicsDevice(canvas, this.ar ? { ...o, alpha: true, premultipliedAlpha: true } : o); if (device) break; } catch (e) { why = e?.message || String(e); }
+      try { device = await pc.createGraphicsDevice(canvas, this.arState ? { ...o, alpha: true, premultipliedAlpha: true } : o); if (device) break; } catch (e) { why = e?.message || String(e); }
     }
     if (!device) {
       const gl = (() => { try { return document.createElement('canvas').getContext('webgl2') ? 'WebGL 2 works' : 'WebGL 2 unavailable'; } catch { return 'WebGL 2 blocked'; } })();
@@ -793,7 +855,7 @@ class Player {
     fit();
     const bg = getComputedStyle(this.root).getPropertyValue('--s4d-bg').trim() || '#0b0b0c';
     const c = new pc.Color(); c.fromString(bg);
-    if (this.ar) c.a = 0;                        // see-through, so the camera shows behind the splats
+    if (this.pass) c.a = 0;                      // see-through in passthrough, so the room shows behind the splats
     const camera = this.camera = new pc.Entity('camera');
     camera.addComponent('camera', { clearColor: c, fov: this.scene.fov || 40, nearClip: 0.01, farClip: 1000 });
     camera.addComponent('script');
@@ -802,19 +864,19 @@ class Player {
     controls.moveSpeed = 1; controls.focusDamping = 0.9;
     // viewers only orbit and zoom; no flying or panning away from the filmed views
     controls.enableFly = false; controls.middleButton = 'none'; controls.rightButton = 'none';
-    if (this.ar) controls.enabled = false;       // AR: the phone's motion and the AR gestures move the view
+    if (this.lookMode) controls.enabled = false; // look view: gestures, hands and the phone's motion move it
     this.content = new pc.Entity('content');
     app.root.addChild(this.content);
     this.cache = new Map(); this.loading = new Map(); this.chain = Promise.resolve();
     this.i = 0; this.acc = 0;
-    app.on('update', (dt) => { if (this.ar) this.arUpdate(); else this.applyTilt(dt); this.tick(dt); });
+    app.on('update', (dt) => { if (this.lookMode) this.arUpdate(); else this.applyTilt(dt); this.tick(dt); });
     app.start();
   }
 
   goTo(name, instant = false) {
     const v = this.scene.views[name]; if (!v) return;
     const pc = this.pc;
-    if (this.ar && this.root.classList.contains('ar-on')) {          // AR: turn the scene so this camera's angle faces you
+    if (this.lookMode && this.arState) {          // AR: turn the scene so this camera's angle faces you
       const s = this.arState, h = this.viewHeading(name);
       s.yaw = -h;
       this.view = name;
@@ -877,7 +939,7 @@ class Player {
       if (this.cache.has(k)) return this.cache.get(k);
       const pc = this.pc, data = dec.v3 ? await buildFrame3(pc, dec, k) : await buildFrame(pc, dec, k);
       if (dec !== this.dec || !this.app) throw new Error('stale');
-      if (this.ar) this.arCrop(data);
+      if (this.pass) this.arCrop(data);              // passthrough: the 4DGS's walls give way to your room
       const res = new pc.GSplatResource(this.app.graphicsDevice, data);
       const e = new pc.Entity(`frame_${k}`);
       e.addComponent('gsplat');

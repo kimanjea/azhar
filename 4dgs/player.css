@@ -92,8 +92,9 @@ body.ar-page { margin: 0; background: #000; overscroll-behavior: none; }
 .s4d-cam { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; pointer-events: none; }
 /* tracking only (hands, Instructor mode without AR): the camera runs but stays hidden; opacity, not display:none,
    so phones keep delivering frames */
-.s4d-arview.has-cam .s4d-cam { opacity: 1; }
-.s4d-arview.has-cam .s4d-poster { display: none; }
+.s4d.has-cam .s4d-cam { opacity: 1; }
+.s4d .s4d-cam { z-index: 0; }
+.s4d.has-cam .s4d-poster { display: none; }
 .s4d-arview .s4d-canvas { cursor: default; }
 .s4d-close { position: absolute; top: calc(env(safe-area-inset-top) + 12px); left: 12px; z-index: 3; width: 40px; height: 40px;
   display: grid; place-items: center; border-radius: var(--r-full); color: #f5f5f7; background: rgb(22 22 24 / .62);
@@ -121,17 +122,17 @@ body.ar-page { margin: 0; background: #000; overscroll-behavior: none; }
   border-radius: var(--r-full); font-size: .75rem; color: #f5f5f7; background: rgb(22 22 24 / .55); pointer-events: none;
   text-align: center; width: max-content; max-width: calc(100% - 32px); display: none; }
 .s4d-handhint { top: calc(env(safe-area-inset-top) + 64px); }
-.s4d-arview.hands-on .s4d-handhint { display: block; animation: s4d-fade 6s var(--ease-out) forwards; }
-.s4d-arview.hands-on .s4d-hint, .s4d-arview.teach-on .s4d-hint { display: none; }
+.s4d.hands-on .s4d-handhint { display: block; animation: s4d-fade 6s var(--ease-out) forwards; }
+.s4d.hands-on .s4d-hint, .s4d.teach-on .s4d-hint { display: none; }
 .s4d-teachhint { top: calc(env(safe-area-inset-top) + 98px); }
-.s4d-arview.teach-on .s4d-teachhint { display: block; animation: s4d-fade 6s var(--ease-out) forwards; }
-.s4d-arview.vision-loading .s4d-teachhint::after { content: " · Loading…"; }
-.s4d-arview.vision-loading .s4d-handhint::after { content: " · Loading…"; }
+.s4d.teach-on .s4d-teachhint { display: block; animation: s4d-fade 6s var(--ease-out) forwards; }
+.s4d.vision-loading .s4d-teachhint::after { content: " · Loading…"; }
+.s4d.vision-loading .s4d-handhint::after { content: " · Loading…"; }
 .s4d-handnote { bottom: calc(env(safe-area-inset-bottom) + 72px); }
 .s4d-handnote:not(:empty) { display: block; }
-.s4d-arview.cam-mirror .s4d-cam { transform: scaleX(-1); }   /* selfie camera / webcam: show it like a mirror */
-.s4d-arview .s4d-flip { display: none; }
-.s4d-arview.has-cams .s4d-flip { display: grid; }               /* only when there's a second camera */
+.s4d.cam-mirror .s4d-cam { transform: scaleX(-1); }   /* selfie camera / webcam: show it like a mirror */
+.s4d .s4d-flip { display: none; }
+.s4d.has-cams .s4d-flip { display: grid; }               /* only when there's a second camera */
 
 /* phones: frosted glass over a moving camera or 3D view is re-blurred every frame, which slows iPhones down.
    A solid dark panel looks nearly the same and costs nothing. */
@@ -144,9 +145,11 @@ body.ar-page { margin: 0; background: #000; overscroll-behavior: none; }
 
 /* occlusion: the live camera redrawn over the 3D view where your hands or people are, so they pass in front */
 .s4d-occ { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
-.s4d-arview:not(.cam-on) .s4d-occ { display: none; }
+.s4d:not(.cam-on) .s4d-occ { display: none; }
 /* teaching without AR: the "Turn on camera" panel shrinks to just its button, out of the way */
 .s4d-arview.teach-on:not(.ar-on) .s4d-campanel, .s4d-arview.hands-on:not(.ar-on) .s4d-campanel {
   width: auto; padding: 0; background: none !important; bottom: calc(env(safe-area-inset-bottom) + 72px); }
 .s4d-arview.teach-on:not(.ar-on) .s4d-campanel > :not(.s4d-camera),
 .s4d-arview.hands-on:not(.ar-on) .s4d-campanel > :not(.s4d-camera) { display: none; }
+/* the tools wrap onto a second row in a narrow card instead of running off its left edge */
+.s4d-tools { flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 2 * var(--space-3)); }
