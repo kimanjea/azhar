@@ -292,8 +292,13 @@ class Player {
     const s = this.arState, cv = () => this.$('.s4d-canvas');
     this.$('.s4d-camera')?.addEventListener('click', () => this.startCamera());
     this.$('.s4d-hands')?.addEventListener('click', () => this.toggleHands());
+    this.$('.s4d-teach')?.addEventListener('click', () => this.toggleTeach());
     this.$('.s4d-flip')?.addEventListener('click', () => this.switchCamera());
-    this.root.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'h' && this.live) this.toggleHands(); });
+    this.root.addEventListener('keydown', (e) => {
+      if (!this.live) return;
+      const k = e.key.toLowerCase();
+      if (k === 'h') this.toggleHands(); else if (k === 'i') this.toggleTeach();
+    });
     const two = () => { const [a, b] = [...s.pts.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y), ang: Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI }; };
     const begin = () => { s.g = s.pts.size === 2 ? { ...two(), zoom: s.zoom, yaw: s.yaw } : null; };
     this.root.addEventListener('pointerdown', (e) => {
@@ -351,7 +356,7 @@ class Player {
       this.$('.s4d-flip')?.setAttribute('aria-label', this.camMirror ? 'Switch to the back camera' : 'Switch to the front camera');
       this.root.classList.add('has-cam');
       if (this.arState) { this.arState.q0 = null; }               // turn from here, not from where the old camera was
-      if (this.handsState) this.handsState.prev = new Map();
+      if (this.vis) { this.vis.prev = new Map(); this.vis.raw = []; this.vis.cuts = []; }
       return true;
     } catch { return false; }
   }
@@ -364,53 +369,164 @@ class Player {
     if (btn) btn.disabled = false;
   }
 
-  // ---- hand tracking ----
-  async toggleHands() {
-    const btn = this.$('.s4d-hands'), h = this.handsState || (this.handsState = { on: false, tracker: null, prev: new Map(), grab: null, dots: [] });
-    if (h.on) { h.on = false; btn?.setAttribute('aria-pressed', 'false'); this.root.classList.remove('hands-on'); h.dots.forEach((d) => { d.hidden = true; }); return; }
-    if (!this.root.classList.contains('has-cam')) { await this.startCamera(); if (!this.root.classList.contains('has-cam')) return; }
-    btn?.setAttribute('aria-pressed', 'true'); this.root.classList.add('hands-on');
-    if (!h.tracker) {
-      this.root.classList.add('hands-loading');
-      try { h.tracker = await (await import(new URL('hands.js', import.meta.url).href)).createHandTracker(); }
-      catch (e) { this.root.classList.remove('hands-loading', 'hands-on'); btn?.setAttribute('aria-pressed', 'false'); this.$('.s4d-handnote') && (this.$('.s4d-handnote').textContent = 'Hand tracking couldn’t start in this browser.'); return; }
-      this.root.classList.remove('hands-loading');
-      for (let i = 0; i < 2; i++) { const d = document.createElement('div'); d.className = 's4d-handdot'; d.hidden = true; this.root.append(d); h.dots.push(d); }
-    }
-    h.on = true;
-    const loop = () => { if (!h.on) return; this.handsTick(); requestAnimationFrame(loop); };
-    requestAnimationFrame(loop);
+  // ---- camera vision ----
+  // Hand button: hand tracking (pinch in the air to grab). Instructor button: your hands show in front of the scene,
+  // cut out pixel-tight like Vision Pro. Two runners in two workers: 'hands' (fast) and 'cut' (slower). Between
+  // cut-out updates, each cut-out rides along with its hand, moved by the fast hand tracker, so it keeps up with you.
+  visState() {
+    return this.vis || (this.vis = { want: { hands: false, cut: false }, run: {}, loading: {}, raw: [], rawT: 0,
+      prev: new Map(), grab: null, dots: [], cuts: [], maskC: null, drew: false, loop: false });
   }
 
-  handsTick() {
-    const h = this.handsState, v = this.$('.s4d-cam');
-    if (!v || v.readyState < 2 || !v.videoWidth) return;
-    const now = performance.now();
-    if (now - (h.t || 0) < 45) return;                 // about 20 detections a second: smooth enough, kind to the battery
-    h.t = now;
-    let hands; try { hands = h.tracker.detect(v); } catch { return; }
-    if (!hands) return;
-    // camera image (0..1) -> screen, as object-fit: cover crops it
-    const W = this.root.clientWidth, H = this.root.clientHeight, k = Math.max(W / v.videoWidth, H / v.videoHeight);
-    const ox = (v.videoWidth * k - W) / 2, oy = (v.videoHeight * k - H) / 2;
+  toggleHands() { return this.setVision('hands', !this.visState().want.hands); }
+  toggleTeach() { return this.setVision('cut', !this.visState().want.cut); }
+
+  async runner(role) {
+    const v = this.visState();
+    if (v.run[role]) return v.run[role];
+    v.loading[role] = v.loading[role] || import(new URL('hands.js', import.meta.url).href).then((m) => m.createVisionRunner(role));
+    try { return (v.run[role] = await v.loading[role]); } catch (e) { v.loading[role] = null; throw e; }
+  }
+
+  async setVision(kind, on) {
+    const v = this.visState(), btn = this.$(kind === 'hands' ? '.s4d-hands' : '.s4d-teach'), note = this.$('.s4d-handnote');
+    const cls = kind === 'hands' ? 'hands-on' : 'teach-on';
+    if (on && !this.root.classList.contains('has-cam')) { await this.startCamera(); if (!this.root.classList.contains('has-cam')) return; }
+    v.want = { ...v.want, [kind]: on };
+    btn?.setAttribute('aria-pressed', String(on)); this.root.classList.toggle(cls, on);
+    if (!on) {
+      if (kind === 'hands') { v.grab = null; v.prev = new Map(); v.dots.forEach((d) => { d.hidden = true; }); }
+      else v.cuts = [];
+      return;
+    }
+    if (note) note.textContent = '';
+    this.root.classList.add('vision-loading');
+    try {
+      await this.runner('hands');                       // both modes need to know where your hands are
+      if (kind === 'cut') await this.runner('cut');
+    } catch (e) {
+      v.want = { ...v.want, [kind]: false };
+      btn?.setAttribute('aria-pressed', 'false'); this.root.classList.remove(cls);
+      if (note) note.textContent = kind === 'hands' ? 'Hand tracking couldn’t start in this browser.' : 'Instructor mode couldn’t start in this browser.';
+      return;
+    } finally { this.root.classList.remove('vision-loading'); }
+    if (!v.dots.length) for (let i = 0; i < 2; i++) { const d = document.createElement('div'); d.className = 's4d-handdot'; d.hidden = true; this.root.append(d); v.dots.push(d); }
+    if (!v.loop) { v.loop = true; const loop = () => { this.visionTick(); requestAnimationFrame(loop); }; requestAnimationFrame(loop); }
+  }
+
+  visionTick() {
+    const v = this.vis, cam = this.$('.s4d-cam');
+    if (!v || !cam || cam.readyState < 2 || !cam.videoWidth) return;
+    const any = v.want.hands || v.want.cut;
+    // the fast runner goes as fast as it can; the slow one works on the side with the hands it was last told about
+    if (any && v.run.hands && !v.run.hands.busy) {
+      v.run.hands.detect(cam).then((r) => { if (r?.hands) this.onHands(r.hands, cam); }, () => {});
+    }
+    if (v.want.cut && v.run.cut && !v.run.cut.busy && v.raw.length && performance.now() - (v.cutT || 0) > 160) {
+      v.cutT = performance.now();                       // the shape only needs ~6 refreshes a second; hands get the CPU first
+      const hands = v.raw.map(({ id, pts, cx, cy, size }) => ({ id, pts, cx, cy, size }));
+      v.run.cut.detect(cam, { hands }).then((r) => { if (r?.cuts) this.onCuts(r.cuts); }, () => {});
+    }
+    this.drawOcclusion(cam);
+  }
+
+  // camera image (0..1) -> screen, as object-fit: cover crops it (and mirrored for the front camera)
+  camToScreen(cam) {
+    const W = this.root.clientWidth, H = this.root.clientHeight, k = Math.max(W / cam.videoWidth, H / cam.videoHeight);
+    const ox = (cam.videoWidth * k - W) / 2, oy = (cam.videoHeight * k - H) / 2, m = this.camMirror;
+    return { W, H, k, ox, oy, x: (u) => (m ? 1 - u : u) * cam.videoWidth * k - ox, y: (w) => w * cam.videoHeight * k - oy };
+  }
+
+  onHands(hands, cam) {
+    const v = this.vis, now = performance.now();
+    // how fast each hand is moving (frame widths per ms), to draw its cut-out a touch ahead and cancel the delay
+    for (const h of hands) {
+      const p = v.raw.find((x) => x.id === h.id), dt = now - v.rawT;
+      const vx = p && dt > 0 && dt < 250 ? (h.cx - p.cx) / dt : 0, vy = p && dt > 0 && dt < 250 ? (h.cy - p.cy) / dt : 0;
+      h.vx = p?.vx != null ? p.vx * 0.4 + vx * 0.6 : vx; h.vy = p?.vy != null ? p.vy * 0.4 + vy * 0.6 : vy;
+    }
+    v.raw = hands; v.rawT = now;
+    if (!v.want.hands) return;
+    const s = this.camToScreen(cam);
     const seen = hands.map((x) => {
-      const sx = (this.camMirror ? 1 - x.x : x.x) * v.videoWidth * k - ox, sy = x.y * v.videoHeight * k - oy, p = h.prev.get(x.id);
+      const sx = s.x(x.x), sy = s.y(x.y), p = v.prev.get(x.id);
       const pinching = p?.pinching ? x.pinch < 0.45 : x.pinch < 0.28;           // a little hysteresis, so a pinch holds
-      const a = p ? 0.5 : 1;                                                    // smooth the jitter
+      const a = p ? 0.6 : 1;                                                    // smooth the jitter, lightly
       return { id: x.id, pinching, x: p ? p.x + (sx - p.x) * a : sx, y: p ? p.y + (sy - p.y) * a : sy,
         size: p ? p.size + (x.size - p.size) * a : x.size };
     });
-    h.dots.forEach((d, i) => {
+    v.dots.forEach((d, i) => {
       const x = seen[i]; d.hidden = !x;
       if (x) { d.style.transform = `translate(${x.x}px, ${x.y}px)`; d.classList.toggle('is-pinching', x.pinching); }
     });
     this.handsGesture(seen.filter((x) => x.pinching));
-    h.prev = new Map(seen.map((x) => [x.id, x]));
+    v.prev = new Map(seen.map((x) => [x.id, x]));
+  }
+
+  onCuts(cuts) {
+    this.vis.cuts = cuts.map((c) => {
+      const cv = document.createElement('canvas'); cv.width = c.cw; cv.height = c.ch;
+      const img = new ImageData(c.cw, c.ch), d = img.data;
+      for (let i = 0, j = 3; i < c.data.length; i++, j += 4) d[j] = c.data[i];
+      cv.getContext('2d').putImageData(img, 0, 0);
+      return { ...c, data: null, canvas: cv };
+    });
+  }
+
+  // Instructor mode, the way Vision Pro lets your hands break through: the live camera shows over the 3D view only
+  // inside your hands' cut-outs. Each cut-out is drawn where its hand is NOW (moved and scaled with the fast tracker).
+  drawOcclusion(cam) {
+    const v = this.vis, occ = this.$('.s4d-occ'); if (!occ) return;
+    const g = occ.getContext('2d');
+    const fresh = performance.now() - v.rawT < 300;                   // hands seen recently
+    const cuts = v.want.cut && fresh ? v.cuts : [];
+    const placed = cuts.map((c) => [c, c.id === 'people' ? c : v.raw.find((h) => h.id === c.id)]).filter(([, h]) => h);
+    if (!placed.length) { if (v.drew) { g.clearRect(0, 0, occ.width, occ.height); v.drew = false; } return; }
+    // 1. the cut-outs, at the hands' current places, in the small frame the models saw
+    const { w, h } = placed[0][0];
+    const mc = v.maskC || (v.maskC = document.createElement('canvas')), mg = mc.getContext('2d');
+    if (mc.width !== w || mc.height !== h) { mc.width = w; mc.height = h; }
+    mg.setTransform(1, 0, 0, 1, 0, 0); mg.clearRect(0, 0, w, h);
+    let bx0 = w, by0 = h, bx1 = 0, by1 = 0;                           // the box the cut-outs cover, to redraw only that
+    for (const [c, now] of placed) {
+      if (c.id === 'people') { mg.setTransform(1, 0, 0, 1, 0, 0); }
+      else {
+        const ahead = Math.min(90, performance.now() - v.rawT + 40);          // ms to look ahead: since the last update, plus the tracker's own delay
+        const nx = now.cx + (now.vx || 0) * ahead, ny = now.cy + (now.vy || 0) * ahead;
+        const k = now.size / c.size, ax = c.cx * w, ay = c.cy * h;
+        mg.setTransform(k, 0, 0, k, nx * w - k * ax, ny * h - k * ay);           // slide and scale with the hand
+      }
+      mg.drawImage(c.canvas, c.x0, c.y0);
+      const T = mg.getTransform();
+      for (const [px, py] of [[c.x0, c.y0], [c.x0 + c.cw, c.y0 + c.ch]]) {
+        const q = T.transformPoint({ x: px, y: py });
+        bx0 = Math.min(bx0, q.x); by0 = Math.min(by0, q.y); bx1 = Math.max(bx1, q.x); by1 = Math.max(by1, q.y);
+      }
+    }
+    mg.setTransform(1, 0, 0, 1, 0, 0);
+    // 2. the live camera, kept only inside them (drawn plainly, then trimmed: iPhone ignores blend modes on video)
+    const s = this.camToScreen(cam), W = Math.round(s.W), H = Math.round(s.H);   // camera footage: 1x is enough
+    if (occ.width !== W || occ.height !== H) { occ.width = W; occ.height = H; }
+    g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H);
+    g.save();
+    const cw = cam.videoWidth, ch = cam.videoHeight;
+    if (this.camMirror) g.setTransform(-s.k, 0, 0, s.k, s.W + s.ox, -s.oy); else g.setTransform(s.k, 0, 0, s.k, -s.ox, -s.oy);
+    g.imageSmoothingEnabled = true;
+    // only the hands' box: from the small frame's pixels to the camera's
+    const fx = cw / w, fy = ch / h;
+    g.beginPath(); g.rect(bx0 * fx - 2, by0 * fy - 2, (bx1 - bx0) * fx + 4, (by1 - by0) * fy + 4); g.clip();
+    g.globalCompositeOperation = 'source-over';
+    g.drawImage(cam, 0, 0, cw, ch);
+    g.globalCompositeOperation = 'destination-in';
+    g.drawImage(mc, 0, 0, cw, ch);                  // smoothly scaled up: soft edges
+    g.globalCompositeOperation = 'source-over';
+    g.restore(); g.setTransform(1, 0, 0, 1, 0, 0);
+    v.drew = true;
   }
 
   // pinch in the air = grab. One hand: move to turn, pull in / push out to bring it closer / farther. Two hands: resize and turn.
   handsGesture(p) {
-    const h = this.handsState, s = this.arState, g = h.grab;
+    const h = this.vis, s = this.arState, g = h.grab;
     const key = p.map((x) => x.id).sort().join('+');
     if (!p.length || !g || g.key !== key) {                       // a grab starts, ends or changes hands
       h.grab = p.length ? { key, hands: p, yaw: s.yaw, zoom: s.zoom } : null;
@@ -649,7 +765,7 @@ class Player {
       const gl = (() => { try { return document.createElement('canvas').getContext('webgl2') ? 'WebGL 2 works' : 'WebGL 2 unavailable'; } catch { return 'WebGL 2 blocked'; } })();
       throw Object.assign(new Error(why), { noDevice: true, detail: `${gl}${navigator.gpu ? ', WebGPU present' : ''}${why ? ` · ${why}` : ''}` });
     }
-    device.maxPixelRatio = Math.min(devicePixelRatio, SMALL ? 1.5 : 2);
+    device.maxPixelRatio = Math.min(devicePixelRatio, SMALL ? (this.ar ? 1.25 : 1.5) : 2);   // full-screen AR on a phone: a little lighter
     const opts = new pc.AppOptions();
     opts.graphicsDevice = device;
     opts.componentSystems = [pc.CameraComponentSystem, pc.ScriptComponentSystem, pc.GSplatComponentSystem];

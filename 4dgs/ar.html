@@ -16,6 +16,7 @@
   <video class="s4d-cam" playsinline muted autoplay aria-hidden="true"></video>
   <img class="s4d-poster" src="flame_steak_10s/poster.jpg" alt="A cook searing steak with a blowtorch" width="1440" height="900">
   <canvas class="s4d-canvas" tabindex="0" aria-label="The 4D scene over your camera. Turn your phone to look around, drag to turn the scene, pinch to resize."></canvas>
+  <canvas class="s4d-occ" aria-hidden="true"></canvas>
   <div class="s4d-cover">
     <button class="btn btn-primary s4d-start" type="button">View in 3D</button>
     <div class="s4d-bar" aria-hidden="true"><div></div></div>
@@ -28,12 +29,14 @@
     <button class="btn btn-primary s4d-camera" type="button">Turn on camera</button>
   </div>
   <p class="s4d-hint" aria-hidden="true">Turn your phone to look around · Drag to turn · Pinch to resize</p>
-  <p class="s4d-handhint" aria-hidden="true">Hold a hand up in view · Pinch in the air to grab · Two hands to resize and turn</p>
+  <p class="s4d-handhint" aria-hidden="true">Pinch in the air to grab · Two hands to resize and turn</p>
+  <p class="s4d-teachhint" aria-hidden="true">Instructor mode · Your hands show in front of the scene</p>
   <p class="s4d-handnote" role="status"></p>
   <div class="s4d-tools">
     <button type="button" class="s4d-reset" aria-label="Back to the first view and moment, in front of you" title="Back to the first view and moment, in front of you (R)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 6.2A5.2 5.2 0 1 1 3 9.6"/><path d="M3 2.8v3.6h3.6"/></svg></button>
     <button type="button" class="s4d-flip" aria-label="Switch to the front camera" title="Switch camera"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h2l1.2-1.6h4.6l1.2 1.6h2a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1z"/><path d="M5.6 9.4a2.5 2.5 0 0 1 4.2-1.6l.6.6M10.4 8.6a2.5 2.5 0 0 1-4.2 1.6l-.6-.6M10.4 7v1.4H9M5.6 11V9.6H7"/></svg></button>
     <button type="button" class="s4d-hands" aria-pressed="false" aria-label="Hand tracking: pinch in the air to grab" title="Hand tracking: pinch in the air to grab (H)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 8.5V3.2a1 1 0 0 1 2 0v4.3M7.5 7V2.4a1 1 0 0 1 2 0V7M9.5 7V3.2a1 1 0 0 1 2 0v5.3M11.5 6.4a1 1 0 0 1 2 0v3.1a4.6 4.6 0 0 1-4.6 4.6h-.6a4 4 0 0 1-3.3-1.8L3 9.6a1 1 0 0 1 1.6-1.2l.9 1.1"/></svg></button>
+    <button type="button" class="s4d-teach" aria-pressed="false" aria-label="Instructor mode: your hands show in front of the scene" title="Instructor mode: your hands show in front of the scene (I)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.2 6.2 8 3l6.8 3.2L8 9.4z"/><path d="M4.2 7.7v3.1c0 .9 1.7 1.9 3.8 1.9s3.8-1 3.8-1.9V7.7"/><path d="M14.8 6.2v3.6"/></svg></button>
     <button type="button" class="s4d-spin" aria-pressed="false" aria-label="Turn around slowly" title="Turn around slowly (S)"><svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="8" rx="6.2" ry="2.6"/><path d="M12.6 4.6l1.6.8-.9 1.5"/><circle cx="8" cy="8" r="1.4"/></svg></button>
   </div>
   <div class="s4d-controls">
