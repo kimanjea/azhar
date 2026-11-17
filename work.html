@@ -190,50 +190,40 @@
 
     <article class="feature reveal" id="4dgs" aria-labelledby="s4d-title">
       <div class="shot s4d-shot">
-        <div class="s4d" data-splat4d data-scene="4dgs/stage_pouf/scene.json">
-          <img class="s4d-poster" src="4dgs/stage_pouf/poster.jpg" alt="A kitten resting on a pouf, captured as a moving Gaussian splat" width="1440" height="900" loading="lazy">
+        <div class="s4d" data-splat4d data-scene="4dgs/flame_steak/scene.json">
+          <img class="s4d-poster" src="4dgs/flame_steak/poster.jpg" alt="A cook searing steak with a blowtorch, captured as a moving Gaussian splat" width="1440" height="900" loading="lazy">
           <canvas class="s4d-canvas" tabindex="0" aria-label="Interactive 3D view. Drag to look around, scroll to zoom, Space to play or pause, arrow keys to step."></canvas>
           <div class="s4d-cover">
             <button class="btn btn-primary s4d-start" type="button">View in 3D</button>
             <div class="s4d-bar" aria-hidden="true"><div></div></div>
-            <p class="s4d-status" role="status">5 seconds · 70 MB download</p>
+            <p class="s4d-status" role="status">2 seconds · 15 MB download</p>
           </div>
           <p class="s4d-hint" aria-hidden="true">Drag to look around · Scroll to zoom</p>
           <div class="s4d-controls">
             <button class="s4d-play" type="button" aria-label="Pause"></button>
-            <input class="s4d-scrub" type="range" min="0" max="49" value="0" aria-label="Moment">
+            <input class="s4d-scrub" type="range" min="0" max="59" value="0" aria-label="Moment">
             <span class="s4d-time">0:00</span>
             <button type="button" data-view="cam1" aria-pressed="true">View 1</button>
             <button type="button" data-view="cam2" aria-pressed="false">View 2</button>
+            <button type="button" data-view="cam3" aria-pressed="false">View 3</button>
+            <button type="button" data-view="cam4" aria-pressed="false">View 4</button>
           </div>
-        </div>
-        <div class="s4d-more">
-          <button class="s4d-more-toggle" type="button" aria-expanded="false" aria-controls="s4d-more-list">More 4D clips</button>
-          <ul class="s4d-more-list" id="s4d-more-list" hidden>
-            <li><button type="button" aria-current="true" data-scene="4dgs/stage_pouf/scene.json" data-poster="4dgs/stage_pouf/poster.jpg" data-status="5 seconds · 70 MB download" data-alt="A kitten resting on a pouf, captured as a moving Gaussian splat">
-              <img src="4dgs/stage_pouf/poster.jpg" alt="" width="1440" height="900" loading="lazy"><span><b>Pouf nap</b><small>5 s · 70 MB</small></span></button></li>
-            <li><button type="button" aria-current="false" data-scene="4dgs/cat/scene.json" data-poster="4dgs/cat/poster.jpg" data-status="5 seconds · 66 MB download" data-alt="Two cats resting on a sofa, captured as a moving Gaussian splat">
-              <img src="4dgs/cat/poster.jpg" alt="" width="1440" height="900" loading="lazy"><span><b>Sofa nap</b><small>5 s · 66 MB</small></span></button></li>
-            <li><button type="button" aria-current="false" data-scene="4dgs/cat1_5-10s/scene.json" data-poster="4dgs/cat1_5-10s/poster.jpg" data-status="5 seconds · 88 MB download" data-alt="A cat stretching on a sofa, captured as a moving Gaussian splat">
-              <img src="4dgs/cat1_5-10s/poster.jpg" alt="" width="1440" height="900" loading="lazy"><span><b>Sofa nap, later</b><small>5 s · 88 MB</small></span></button></li>
-            <li><button type="button" aria-current="false" data-scene="4dgs/cat3_0-5s/scene.json" data-poster="4dgs/cat3_0-5s/poster.jpg" data-status="5 seconds · 82 MB download" data-alt="Two kittens playing on a sofa, captured as a moving Gaussian splat">
-              <img src="4dgs/cat3_0-5s/poster.jpg" alt="" width="1440" height="900" loading="lazy"><span><b>Two kittens</b><small>5 s · 82 MB</small></span></button></li>
-          </ul>
         </div>
       </div>
       <div class="text">
         <p class="kicker caption">R&amp;D · SplatPipe · 2026</p>
         <h3 id="s4d-title">4DGS: Moving Gaussian Splats</h3>
         <p class="meta">Real moments, captured in 3D and replayed in time</p>
-        <p>The future of cognitive decision-making training lies in 4DGS: real people and real moments, captured as they happen, that you can step into and study from any angle. This is a 5-second capture from my own pipeline.</p>
+        <p>The future of cognitive decision-making training lies in 4DGS: real people and real moments, captured as they happen, that you can step into and study from any angle. This 2-second clip was trained with my own pipeline, SplatPipe, from four fixed cameras.</p>
         <p class="meta">Try it</p>
         <ul class="points">
           <li>Press <strong>View in 3D</strong>. It loads in the page, no app needed.</li>
           <li>Drag to shift your viewpoint and scroll or pinch to zoom.</li>
           <li>Use play, pause and the slider to move through time. Pause on any moment and look around it.</li>
-          <li><strong>View 1</strong> and <strong>View 2</strong> jump to where each camera stood.</li>
+          <li><strong>View 1</strong> to <strong>View 4</strong> jump to where each of the four cameras stood.</li>
           <li>On a keyboard, Space plays or pauses and the arrow keys step one moment.</li>
         </ul>
+        <p class="meta">Footage: <a href="https://github.com/facebookresearch/Neural_3D_Video">Neural 3D Video dataset</a> (Li et al., CVPR 2022, Meta), <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>. Trained by me into a 4D Gaussian splat with SplatPipe.</p>
         <ul class="tags" aria-label="Topics"><li>4D Gaussian Splatting</li><li>Spatial computing</li><li>Decision-making training</li><li>Real-time 3D</li></ul>
       </div>
     </article>
