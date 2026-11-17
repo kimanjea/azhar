@@ -329,7 +329,8 @@ class Player {
     // iPhone asks for motion access only from a tap, so ask before anything else is awaited
     const D = typeof DeviceOrientationEvent !== 'undefined' ? DeviceOrientationEvent : null;
     const motion = D && typeof D.requestPermission === 'function' ? D.requestPermission().catch(() => 'denied') : Promise.resolve(D ? 'granted' : 'denied');
-    const camOk = await this.openCamera(this.camFacing || 'environment');
+    // AR shows the room: the back camera unless the visitor picked the front one while in AR
+    const camOk = await this.openCamera(this.arFacing || 'environment', true);
     if (!camOk && note) note.textContent = 'The camera stayed off. Allow camera access for this site in your browser settings, then try again.';
     if (await motion === 'granted' && !this.arListening) {
       this.arListening = true;
@@ -339,8 +340,10 @@ class Player {
     if (camOk) this.root.classList.add('ar-on'); else btn.disabled = false;
   }
 
-  // open the front ("user") or back ("environment") camera; the front camera is shown like a mirror
-  async openCamera(facing) {
+  // open the front ("user") or back ("environment") camera; the front camera is shown like a mirror.
+  // show: false keeps the room hidden and uses the camera for tracking only (hands, Instructor mode), so the 4DGS
+  // keeps its own background, as on the website.
+  async openCamera(facing, show = true) {
     const v = this.$('.s4d-cam');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing } }, audio: false });
@@ -354,7 +357,9 @@ class Player {
       this.root.classList.toggle('cam-mirror', this.camMirror);
       this.root.classList.toggle('has-cams', cams > 1);           // show "switch camera" only when there's another one
       this.$('.s4d-flip')?.setAttribute('aria-label', this.camMirror ? 'Switch to the back camera' : 'Switch to the front camera');
-      this.root.classList.add('has-cam');
+      this.root.classList.add('cam-on');
+      this.root.classList.toggle('has-cam', show);
+      if (show) this.arFacing = this.camFacing;
       if (this.arState) { this.arState.q0 = null; }               // turn from here, not from where the old camera was
       if (this.vis) { this.vis.prev = new Map(); this.vis.raw = []; this.vis.cuts = []; }
       return true;
@@ -362,10 +367,10 @@ class Player {
   }
 
   async switchCamera() {
-    if (!this.root.classList.contains('has-cam')) return this.startCamera();
+    if (!this.root.classList.contains('cam-on')) return this.startCamera();
     const want = this.camFacing === 'environment' ? 'user' : 'environment';
     const btn = this.$('.s4d-flip'); if (btn) btn.disabled = true;
-    await this.openCamera(want);
+    await this.openCamera(want, this.root.classList.contains('has-cam'));
     if (btn) btn.disabled = false;
   }
 
@@ -391,7 +396,14 @@ class Player {
   async setVision(kind, on) {
     const v = this.visState(), btn = this.$(kind === 'hands' ? '.s4d-hands' : '.s4d-teach'), note = this.$('.s4d-handnote');
     const cls = kind === 'hands' ? 'hands-on' : 'teach-on';
-    if (on && !this.root.classList.contains('has-cam')) { await this.startCamera(); if (!this.root.classList.contains('has-cam')) return; }
+    // no camera yet: open it for tracking only (front camera, since you face the screen to teach), room hidden
+    if (on && !this.root.classList.contains('cam-on')) {
+      if (!(await this.openCamera('user', false))) {
+        btn?.setAttribute('aria-pressed', 'false');
+        if (note) note.textContent = 'The camera stayed off. Allow camera access for this site in your browser settings, then try again.';
+        return;
+      }
+    }
     v.want = { ...v.want, [kind]: on };
     btn?.setAttribute('aria-pressed', String(on)); this.root.classList.toggle(cls, on);
     if (!on) {
